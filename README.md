@@ -15,7 +15,7 @@ używasz w dowolnym projekcie, skrypcie i pipeline CI/CD — bez dashboardu i be
 Z GitHub (rekomendowane, zanim trafimy na PyPI):
 
 ```bash
-pip install "liveapisec @ git+https://github.com/<owner>/<repo>.git#subdirectory=cli"
+pip install "liveapisec @ git+https://github.com/liveapisec/liveapisec.git#subdirectory=cli"
 ```
 
 Po publikacji na PyPI:
@@ -124,7 +124,7 @@ jobs:
       - uses: actions/setup-python@v5
         with: { python-version: "3.12" }
       - name: Install CLI
-        run: pip install "liveapisec @ git+https://github.com/<owner>/<repo>.git#subdirectory=cli"
+        run: pip install "liveapisec @ git+https://github.com/liveapisec/liveapisec.git#subdirectory=cli"
       - name: Push API + run security test (gate on high)
         env:
           LIVEAPISEC_API_KEY: ${{ secrets.LIVEAPISEC_KEY }}
