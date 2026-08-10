@@ -142,6 +142,34 @@ def _cmd_push(client: LiveAPISec, args: argparse.Namespace) -> int:
     return 0
 
 
+def _clone_repo(url: str) -> str:
+    """Shallow-clone a git repo (https/ssh/local) into a temp dir and return its path."""
+    import shutil
+    import subprocess
+    import tempfile
+
+    if shutil.which("git") is None:
+        raise LiveAPISecError(None, "git is required", "install git to use --repo")
+    tmp = tempfile.mkdtemp(prefix="liveapisec-repo-")
+    try:
+        proc = subprocess.run(
+            ["git", "clone", "--depth", "1", "--quiet", url, tmp],
+            capture_output=True,
+            text=True,
+            timeout=120,
+            check=False,
+        )
+    except subprocess.TimeoutExpired as exc:
+        shutil.rmtree(tmp, ignore_errors=True)
+        raise LiveAPISecError(None, "Clone timed out", url) from exc
+    if proc.returncode != 0:
+        shutil.rmtree(tmp, ignore_errors=True)
+        raise LiveAPISecError(
+            None, "Could not clone repository", (proc.stderr or proc.stdout or "").strip()[:300]
+        )
+    return tmp
+
+
 def _cmd_push_code(client: LiveAPISec, args: argparse.Namespace) -> int:
     if not args.name:
         print("error: --name is required", file=sys.stderr)
@@ -150,13 +178,27 @@ def _cmd_push_code(client: LiveAPISec, args: argparse.Namespace) -> int:
         print("error: --base-url is required", file=sys.stderr)
         return 2
     root = args.dir or "."
-    result = scan_code(root, framework=args.framework)
+    tmp: str | None = None
+    if args.repo:
+        try:
+            tmp = _clone_repo(args.repo)
+        except LiveAPISecError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 2
+        root = tmp
+    try:
+        result = scan_code(root, framework=args.framework)
+    finally:
+        if tmp:
+            import shutil
+
+            shutil.rmtree(tmp, ignore_errors=True)
     endpoints = result.endpoints
     if not endpoints:
         fw = (
             f" (framework: {result.framework})"
             if result.framework
-            else " — could not detect a supported framework (fastapi/flask/nextjs/laravel/php)"
+            else " — could not detect a supported framework (fastapi/flask/django/nextjs/nestjs/express/laravel/php/spring)"
         )
         print(f"error: no endpoints found in {root}{fw}", file=sys.stderr)
         return 2
@@ -341,12 +383,26 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_code = sub.add_parser(
         "push-code",
-        help="scan source code for endpoints and push them (fastapi/flask/nextjs/laravel/php)",
+        help="scan source code for endpoints and push them (fastapi/flask/django/nextjs/nestjs/express/laravel/php/spring)",
     )
     p_code.add_argument("--dir", default=".", help="project directory or file to scan (default: .)")
     p_code.add_argument(
+        "--repo",
+        help="git URL (https/ssh/local) to shallow-clone and scan instead of --dir",
+    )
+    p_code.add_argument(
         "--framework",
-        choices=["fastapi", "flask", "nextjs", "laravel", "php"],
+        choices=[
+            "fastapi",
+            "flask",
+            "django",
+            "nextjs",
+            "nestjs",
+            "express",
+            "laravel",
+            "php",
+            "spring",
+        ],
         help="force framework (default: auto-detect)",
     )
     p_code.add_argument("--name", required=True)

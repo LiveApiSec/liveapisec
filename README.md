@@ -123,8 +123,18 @@ cd my-project
 liveapisec push-code --dir . --name my-api --base-url https://api.example.com
 ```
 
-- Auto-detected frameworks: **FastAPI**, **Flask**, **Next.js** (`app/api` +
-  `pages/api`), **Laravel**, and generic **PHP** (`$app->get`, Slim, Lumen).
+- Auto-detected frameworks: **FastAPI**, **Flask**, **Django**, **Next.js**
+  (`app/api` + `pages/api`), **NestJS** (`@Controller`/`@Get`), **Express**
+  (`app.get`), **Laravel**, generic **PHP** (`$app->get`, Slim, Lumen) and
+  **Spring** (`@GetMapping`, Java).
+- Scan a git repository straight from a URL (https / ssh / local path) —
+  it is shallow-cloned to a temp dir and cleaned up afterwards:
+
+```bash
+liveapisec push-code --repo git@github.com:acme/my-api.git \
+  --name my-api --base-url https://api.example.com
+```
+
 - Preview before pushing (no API key needed):
 
 ```bash
@@ -144,6 +154,10 @@ found 58 endpoints:
 site 65f...abc: my-api — 58 endpoints, auth=none
 export SITE_ID=65f...abc
 ```
+
+> **Note on methods**: FastAPI/Flask/Express/NestJS/Spring/Laravel carry the
+> HTTP method in the code. Django `urlpatterns` do not — those routes are
+> assumed to be `GET`.
 
 ### 3. `scan` — run a security test
 

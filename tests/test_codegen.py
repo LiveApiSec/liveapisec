@@ -167,6 +167,110 @@ $router->post('/hooks', 'HookController@store');
     assert ("POST", "/hooks") in eps
 
 
+# ---------------------------------------------------------------- Django
+
+
+def test_scan_django(tmp_path) -> None:
+    _write(
+        tmp_path,
+        "myapp/urls.py",
+        """from django.urls import path
+from . import views
+urlpatterns = [
+    path('users/', views.list_users),
+    path('users/<int:pk>/', views.user_detail),
+    re_path(r'^items/(?P<slug>[-\\w]+)/$', views.item),
+    path('admin/', include('admin.urls')),
+]
+""",
+    )
+    result = scan_code(str(tmp_path))
+    assert result.framework == "django"
+    eps = {(e["method"], e["path"]) for e in result.endpoints}
+    assert ("GET", "/users") in eps
+    assert ("GET", "/users/{pk}") in eps
+    assert ("GET", "/items/{slug}") in eps
+    # include()/admin not an endpoint
+    assert ("GET", "/admin") not in eps
+
+
+# ---------------------------------------------------------------- NestJS
+
+
+def test_scan_nestjs(tmp_path) -> None:
+    _write(
+        tmp_path,
+        "src/users.controller.ts",
+        """import { Controller, Get, Post } from '@nestjs/common';
+@Controller('users')
+export class UsersController {
+  @Get()
+  list() {}
+  @Get(':id')
+  detail() {}
+  @Post()
+  create() {}
+}
+""",
+    )
+    result = scan_code(str(tmp_path))
+    assert result.framework == "nestjs"
+    eps = {(e["method"], e["path"]) for e in result.endpoints}
+    assert ("GET", "/users") in eps
+    assert ("GET", "/users/{id}") in eps
+    assert ("POST", "/users") in eps
+
+
+# ---------------------------------------------------------------- Express
+
+
+def test_scan_express(tmp_path) -> None:
+    _write(
+        tmp_path,
+        "app.js",
+        """const express = require('express');
+const app = express();
+app.get('/users', (req, res) => {});
+app.post('/users/:id', (req, res) => {});
+router.put('/health', handler);
+""",
+    )
+    result = scan_code(str(tmp_path))
+    assert result.framework == "express"
+    eps = {(e["method"], e["path"]) for e in result.endpoints}
+    assert ("GET", "/users") in eps
+    assert ("POST", "/users/{id}") in eps
+    assert ("PUT", "/health") in eps
+
+
+# ---------------------------------------------------------------- Spring
+
+
+def test_scan_spring(tmp_path) -> None:
+    _write(
+        tmp_path,
+        "UserController.java",
+        """package com.example.api;
+import org.springframework.web.bind.annotation.*;
+@RestController
+public class UserController {
+  @GetMapping("/users")
+  public String list() { return "ok"; }
+  @PostMapping("/users/{id}")
+  public String update(@PathVariable String id) { return id; }
+  @RequestMapping(value = "/health", method = RequestMethod.GET)
+  public String health() { return "ok"; }
+}
+""",
+    )
+    result = scan_code(str(tmp_path))
+    assert result.framework == "spring"
+    eps = {(e["method"], e["path"]) for e in result.endpoints}
+    assert ("GET", "/users") in eps
+    assert ("POST", "/users/{id}") in eps
+    assert ("GET", "/health") in eps
+
+
 # ---------------------------------------------------------------- detection
 
 
@@ -267,6 +371,7 @@ def test_push_code_pushes_site(tmp_path, capsys) -> None:
 
     args = {
         "dir": str(tmp_path),
+        "repo": None,
         "framework": None,
         "name": "my-api",
         "base_url": "https://api.example.com",
@@ -301,3 +406,56 @@ def test_push_code_no_endpoints(tmp_path, capsys) -> None:
     err = capsys.readouterr().err
     assert code == 2
     assert "no endpoints found" in err
+
+
+# ---------------------------------------------------------------- --repo
+
+
+def test_clone_repo_and_scan(tmp_path, capsys) -> None:
+    import shutil
+    import subprocess
+
+    if shutil.which("git") is None:
+        pytest.skip("git not available")
+
+    # Build a local git repo with a FastAPI file.
+    repo = tmp_path / "src"
+    _write(
+        repo,
+        "main.py",
+        "from fastapi import FastAPI\napp=FastAPI()\n@app.get('/repo')\ndef r(): ...\n",
+    )
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    subprocess.run(["git", "-C", str(repo), "add", "."], check=True)
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(repo),
+            "-c",
+            "user.email=t@t",
+            "-c",
+            "user.name=t",
+            "commit",
+            "-qm",
+            "init",
+        ],
+        check=True,
+    )
+
+    code = main(
+        [
+            "push-code",
+            "--repo",
+            str(repo),
+            "--name",
+            "my-api",
+            "--base-url",
+            "https://api.example.com",
+            "--dry-run",
+        ]
+    )
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "framework: fastapi" in out
+    assert "/repo" in out
