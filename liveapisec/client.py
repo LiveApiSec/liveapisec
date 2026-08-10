@@ -1,11 +1,11 @@
-"""Cienki klient HTTP dla LiveAPISec Developer API (TODO 2.25).
+"""Thin HTTP client for the LiveAPISec Developer API (TODO 2.25).
 
-Wrapsuje endpointy /developers/* tak, żeby dało się ich używać z konsoli,
-CI/CD i skryptów — bez curl i bez dashboardu.
+Wraps the /developers/* endpoints so they can be used from the console,
+CI/CD and scripts — no curl, no dashboard.
 
-Auth: `Authorization: Bearer <LIVEAPISEC_API_KEY>` (klucz `las_dev_...`
-wygenerowany w Settings → Developer API). Token dewelopera (JWT/cookie/API-key)
-jest wysyłany w payloadzie i szyfrowany po stronie serwera (AES-256).
+Auth: `Authorization: Bearer <LIVEAPISEC_API_KEY>` (`las_dev_...` key
+generated in Settings → Developer API). The developer token (JWT/cookie/API-key)
+is sent in the payload and encrypted server-side (AES-256).
 """
 
 from __future__ import annotations
@@ -21,12 +21,12 @@ DEFAULT_API_URL = "https://liveapisec.com"
 ENV_API_URL = "LIVEAPISEC_API_URL"
 ENV_API_KEY = "LIVEAPISEC_API_KEY"
 
-# Kolejność istotności severity (do gate'ów w CI).
+# Severity order (most to least severe) for CI gates.
 _SEV_ORDER = ["critical", "high", "medium", "low", "info"]
 
 
 def severity_rank(severity: str) -> int:
-    """0 = critical (najgorzej) … 4 = info. Nieznane → 5 (poniżej info)."""
+    """0 = critical (worst) … 4 = info. Unknown → 5 (below info)."""
     try:
         return _SEV_ORDER.index(severity)
     except ValueError:
@@ -34,7 +34,7 @@ def severity_rank(severity: str) -> int:
 
 
 class LiveAPISecError(RuntimeError):
-    """Błąd API: status HTTP + title/detail (RFC 7807)."""
+    """API error: HTTP status + title/detail (RFC 7807)."""
 
     def __init__(self, status: int | None, title: str, detail: str = "") -> None:
         super().__init__(f"{title}: {detail}".strip(" :"))
@@ -44,7 +44,7 @@ class LiveAPISecError(RuntimeError):
 
 
 class ScanStatus:
-    """Statusy skanu (jak w UI)."""
+    """Scan statuses (as in the UI)."""
 
     QUEUED = "queued"
     RUNNING = "running"
@@ -57,7 +57,7 @@ def api_url_from_env() -> str:
 
 
 class LiveAPISec:
-    """Klient Developer API. `api_url`/`api_key` z env (LIVEAPISEC_API_URL/KEY)."""
+    """Developer API client. `api_url`/`api_key` from env (LIVEAPISEC_API_URL/KEY)."""
 
     def __init__(
         self,
@@ -114,8 +114,8 @@ class LiveAPISec:
         auth: dict[str, Any] | None = None,
         site_id: str | None = None,
     ) -> dict[str, Any]:
-        """Push site (idempotentny wg nazwy+base_url). Bez `site_id` → POST (create/update),
-        z `site_id` → PUT (explicit update)."""
+        """Push a site (idempotent by name+base_url). Without `site_id` → POST (create/update),
+        with `site_id` → PUT (explicit update)."""
         payload: dict[str, Any] = {"name": name, "base_url": base_url}
         if endpoints:
             payload["endpoints"] = endpoints
@@ -136,7 +136,7 @@ class LiveAPISec:
     def trigger_scan(
         self, site_id: str, branch: str | None = None, commit: str | None = None
     ) -> dict[str, Any]:
-        """Odpal skan (202). Zwraca {scan_id, status, branch, commit}."""
+        """Trigger a scan (202). Returns {scan_id, status, branch, commit}."""
         payload: dict[str, Any] = {}
         if branch:
             payload["branch"] = branch
@@ -148,7 +148,7 @@ class LiveAPISec:
         return self._request("GET", f"/developers/sites/{site_id}/scans")
 
     def get_scan(self, site_id: str, scan_id: str) -> dict[str, Any] | None:
-        """Pojedynczy skan (przez listę — brak dedykowanego GET scan)."""
+        """A single scan (via the list — no dedicated GET scan endpoint)."""
         for s in self.list_scans(site_id):
             if s.get("scan_id") == scan_id:
                 return s
@@ -157,7 +157,7 @@ class LiveAPISec:
     def get_findings(self, site_id: str, scan_id: str) -> list[dict[str, Any]]:
         return self._request("GET", f"/developers/sites/{site_id}/scans/{scan_id}/findings")
 
-    # -- helpers dla CI --------------------------------------------------------
+    # -- CI helpers ------------------------------------------------------------
     def wait_for_scan(
         self,
         site_id: str,
@@ -165,7 +165,7 @@ class LiveAPISec:
         poll_interval: float = 3.0,
         timeout: float = 600.0,
     ) -> dict[str, Any]:
-        """Polluj aż skan się zakończy (completed/failed). Zwraca skan + findings."""
+        """Poll until the scan finishes (completed/failed). Returns scan + findings."""
         deadline = time.monotonic() + timeout
         while True:
             scan = self.get_scan(site_id, scan_id)

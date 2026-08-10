@@ -1,13 +1,13 @@
-# liveapisec — oficjalny CLI/SDK do LiveAPISec Developer API (TODO 2.25).
-# Instalacja z GitHub:  pip install git+https://github.com/<owner>/<repo>.git#subdirectory=cli
-# (po publikacji na PyPI:  pip install liveapisec)
+# liveapisec — official CLI/SDK for the LiveAPISec Developer API (TODO 2.25).
+# Install from PyPI:  pip install liveapisec
+# Or from GitHub:     pip install git+https://github.com/LiveApiSec/liveapisec.git
 [build-system]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "liveapisec"
-version = "0.1.0"
+version = "0.1.1"
 description = "LiveAPISec Developer API client — push API specs, run security scans and gate your CI/CD from the command line."
 readme = "README.md"
 requires-python = ">=3.9"

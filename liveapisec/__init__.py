@@ -1,10 +1,10 @@
-"""liveapisec — oficjalny klient LiveAPISec Developer API.
+"""liveapisec — official LiveAPISec Developer API client.
 
-Instalacja::
+Install::
 
-    pip install git+https://github.com/<owner>/<repo>.git#subdirectory=cli
+    pip install liveapisec
 
-Potem w dowolnym projekcie/CI::
+Then in any project/CI::
 
     export LIVEAPISEC_API_KEY=las_dev_...
     liveapisec push --name my-api --base-url https://api.example.com --endpoint "GET /users"
@@ -19,7 +19,7 @@ from .client import (
     severity_rank,
 )
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 
 __all__ = [
     "DEFAULT_API_URL",

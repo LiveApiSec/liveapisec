@@ -1,57 +1,58 @@
-# liveapisec — CLI/SDK do LiveAPISec Developer API
+# liveapisec — CLI/SDK for the LiveAPISec Developer API
 
-Oficjalny, cienki klient do **LiveAPISec Developer API**. Instalujesz raz,
-używasz w dowolnym projekcie, skrypcie i pipeline CI/CD — bez dashboardu i bez curl.
+Official, thin client for the **LiveAPISec Developer API**. Install it once,
+use it in any project, script and CI/CD pipeline — no dashboard, no curl.
 
-> **Kiedy to jest?** Zamiast ręcznie przechodzić kreatora w panelu, developer
-> pushuje endpointy + opcjonalny token z **swojego** środowiska (CI/CD, agent,
-> skrypt). Token jest generowany u Ciebie i szyfrowany po stronie serwera (AES-256).
-> **Tip: brak tokena = testujemy tylko to, co publiczne.**
+> **When to use this?** Instead of walking through the wizard in the dashboard,
+> a developer pushes endpoints + an optional token from **their own**
+> environment (CI/CD, agent, script). The token is generated on your side and
+> encrypted server-side (AES-256).
+> **Tip: no token = we only test what's public.**
 
 ---
 
-## Instalacja
+## Installation
 
-Z PyPI (rekomendowane):
+From PyPI (recommended):
 
 ```bash
 pip install liveapisec
 ```
 
-Z GitHub (jeśli wolisz build z repozytorium):
+From GitHub (if you prefer building from the repository):
 
 ```bash
 pip install "liveapisec @ git+https://github.com/LiveApiSec/liveapisec.git"
 ```
 
-Sprawdź:
+Verify:
 
 ```bash
 liveapisec --help
 ```
 
-Kiedy zainstalujesz raz (np. w obrazie CI, na maszynie dev, w GitHub Actions) —
-komenda `liveapisec` jest dostępna **w każdym projekcie** w tej maszynie.
+Install once (e.g. in a CI image, on a dev machine, in GitHub Actions) and the
+`liveapisec` command is available **in every project** on that machine.
 
 ---
 
-## Konfiguracja
+## Configuration
 
-Klucz API generujesz raz w panelu: **Settings → Developer API → Create API key**
-(klucz `las_dev_...` pokazywany jest tylko raz — trzymaj go jako secret).
+Generate an API key once in the dashboard: **Settings → Developer API → Create API key**
+(the `las_dev_...` key is shown only once — store it as a secret).
 
 ```bash
-export LIVEAPISEC_API_KEY=las_dev_...          # wymagane
-export LIVEAPISEC_API_URL=https://liveapisec.com   # opcjonalne (domyślne)
+export LIVEAPISEC_API_KEY=las_dev_...          # required
+export LIVEAPISEC_API_URL=https://liveapisec.com   # optional (default)
 ```
 
-Można też podać per-komenda: `--api-key` / `--api-url`.
+You can also pass them per command: `--api-key` / `--api-url`.
 
 ---
 
-## Komendy
+## Commands
 
-### 1. `push` — wyślij API (idempotentne, bezpieczne w CI)
+### 1. `push` — push your API (idempotent, safe in CI)
 
 ```bash
 liveapisec push \
@@ -61,49 +62,50 @@ liveapisec push \
   --endpoint "POST /payments"
 ```
 
-- Ten sam `name` + `base_url` = **ten sam site** (aktualizacja, nie duplikat) —
-  możesz wołać push w każdym buildzie.
-- Zamiast listy endpointów możesz podać OpenAPI: `--openapi-url https://api.example.com/openapi.json`.
-- Opcjonalny token: `--auth-type jwt --auth-token <TOKEN>` (albo `bearer`,
+- The same `name` + `base_url` = **the same site** (update, not a duplicate) —
+  you can call push in every build.
+- Instead of a list of endpoints you can provide an OpenAPI spec: `--openapi-url https://api.example.com/openapi.json`.
+- Optional token: `--auth-type jwt --auth-token <TOKEN>` (or `bearer`,
   `cookie --auth-cookie "session=..."`, `api_key --auth-header X-API-Key`).
 
-Wynik:
+Output:
 
 ```
 site 65f...abc: my-api — 2 endpoints, auth=none
 export SITE_ID=65f...abc
 ```
 
-### 2. `scan` — odpal test bezpieczeństwa
+### 2. `scan` — run a security test
 
 ```bash
-# zwykłe odpalanie (202, nie czeka)
+# fire and forget (202, does not wait)
 liveapisec scan --site SITE_ID --branch main --commit "$GITHUB_SHA"
 
-# czekaj na wynik i próg błędu dla CI (gate)
+# wait for the result and fail the build on high (CI gate)
 liveapisec scan --site SITE_ID --branch main --commit "$SHA" \
   --wait --fail-on high
 ```
 
-- `--wait` — polluje aż skan się zakończy (domyślnie timeout 600 s,
-  interwał 3 s; zmiana przez `--timeout` / `--poll-interval`).
-- `--fail-on high` — **exit code 1** gdy znajdzie finding severity `high`/`critical`;
-  `--fail-on critical` tylko przy krytycznych; pomiń → zawsze exit 0 (poza błędami).
+- `--wait` — polls until the scan finishes (default timeout 600 s,
+  interval 3 s; change with `--timeout` / `--poll-interval`).
+- `--fail-on high` — **exit code 1** when a finding of severity `high`/`critical`
+  is found; `--fail-on critical` only for criticals; omit it → always exit 0
+  (except errors).
 
-### 3. `status` — stan site'a i ostatnich skanów
+### 3. `status` — site status + recent scans
 
 ```bash
 liveapisec status --site SITE_ID
 ```
 
-### 4. `findings` — wyniki skanu
+### 4. `findings` — scan results
 
 ```bash
 liveapisec findings --site SITE_ID --scan SCAN_ID
-liveapisec findings --site SITE_ID --scan SCAN_ID --json   # surowe dane (dla agenta/AI)
+liveapisec findings --site SITE_ID --scan SCAN_ID --json   # raw data (for agents/AI)
 ```
 
-### 5. `sites` — szczegóły site'a
+### 5. `sites` — site details
 
 ```bash
 liveapisec sites --site SITE_ID
@@ -111,7 +113,7 @@ liveapisec sites --site SITE_ID
 
 ---
 
-## GitHub Actions — pełny przykład (gate na push)
+## GitHub Actions — full example (gate on push)
 
 ```yaml
 name: liveapisec
@@ -136,40 +138,75 @@ jobs:
             --wait --fail-on high
 ```
 
-> **Dlaczego push jest bezpieczny?** Push jest idempotentny (name+base_url →
-> ten sam site), więc kolejny build nie tworzy śmieci — aktualizuje endpointy
-> i token, a następny `scan` testuje najnowszy stan.
+> **Why is push safe?** Push is idempotent (name+base_url → the same site), so
+> the next build does not create junk — it updates endpoints and the token, and
+> the next `scan` tests the latest state.
 
 ---
 
 ## Exit codes
 
-| Code | Znaczenie |
-|------|-----------|
-| 0    | OK (brak findings ≥ progu, lub bez `--fail-on`) |
-| 1    | Gate failed — znaleziono findings ≥ `--fail-on` |
-| 2    | Błąd użycia / błąd API / brak klucza |
+| Code | Meaning |
+|------|---------|
+| 0    | OK (no findings at/above the threshold, or no `--fail-on`) |
+| 1    | Gate failed — findings found at/above `--fail-on` |
+| 2    | Usage error / API error / missing key |
 
 ---
 
-## Rozwój / testy
+## Development / tests
 
 ```bash
 pip install -e ./cli[dev]
 cd cli && python -m pytest tests/ -q
 ```
 
-## API (SDK)
+## SDK (API)
 
-Poza CLI pakiet eksportuje też klienta do skryptów:
+Besides the CLI, the package also exports a client for scripts:
 
 ```python
 from liveapisec import LiveAPISec
 
-api = LiveAPISec()  # LIVEAPISEC_API_KEY z env
+api = LiveAPISec()  # LIVEAPISEC_API_KEY from env
 site = api.create_site("my-api", "https://api.example.com",
                        endpoints=[{"method": "GET", "path": "/users"}])
 scan = api.trigger_scan(site["site_id"], branch="main", commit="abc")
 done = api.wait_for_scan(site["site_id"], scan["scan_id"])
 blocked = LiveAPISec.findings_above(done["findings"], "high")
 ```
+
+---
+
+## Instructions for AI coding assistants (Copilot, Cursor, etc.)
+
+Copy-paste the block below into your AI assistant (GitHub Copilot, Cursor,
+Windsurf…) to let it use the LiveAPISec CLI on your behalf.
+
+````markdown
+You can use the `liveapisec` CLI (https://pypi.org/project/liveapisec/) to
+push API specifications and run security scans against the LiveAPISec platform.
+
+Environment:
+- `LIVEAPISEC_API_KEY` — dev API key (las_dev_...), usually already set.
+- `LIVEAPISEC_API_URL` — API base URL (default: https://liveapisec.com).
+- `SITE_ID` — the site id returned by `liveapisec push` / `liveapisec sites`.
+
+Workflow:
+1. Push the API under test (idempotent — safe to repeat):
+   `liveapisec push --name <name> --base-url <url> --endpoint "METHOD /path" [--endpoint ...] [--openapi-url <url>] [--auth-type jwt|bearer|cookie|api_key --auth-token <token>]`
+2. Read the site id from the output (or `liveapisec sites --site <id>`).
+3. Run a security scan and wait for the result:
+   `liveapisec scan --site <site_id> --branch <branch> --commit <sha> --wait`
+4. Read findings:
+   `liveapisec findings --site <site_id> --scan <scan_id>` (add `--json` for raw JSON).
+5. Check site status: `liveapisec status --site <site_id>`.
+
+Rules:
+- Never print or commit the API key; use the environment variable.
+- If a scan fails, read `liveapisec findings --site <id> --scan <scan_id> --json`
+  and summarize each finding (severity, title, target).
+- Push is idempotent, so re-running it is always safe.
+- Exit code 1 from `scan --wait --fail-on <sev>` means the gate failed
+  (findings at/above that severity); exit 2 means usage/API error.
+````

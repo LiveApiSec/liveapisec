@@ -22,10 +22,10 @@ jobs:
         run: |
           pip install build
           python -m build
-      # Publikacja na PyPI:
-      #  1) token API z PyPI jako sekret PYPI_API_TOKEN (username: __token__),
-      #  2) fallback: Trusted Publishing (OIDC, bez sekretów).
-      # Uwaga: secrets nie jest dostępny w warunkach `if` — stąd env.
+      # Publish to PyPI:
+      #  1) PyPI API token as the PYPI_API_TOKEN secret (username: __token__),
+      #  2) fallback: Trusted Publishing (OIDC, no secrets).
+      # Note: `secrets` is not allowed in `if:` conditions — hence env.
       - name: Publish to PyPI (API token)
         if: env.PYPI_API_TOKEN != ''
         uses: pypa/gh-action-pypi-publish@release/v1

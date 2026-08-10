@@ -1,21 +1,21 @@
-"""liveapisec — komendy CLI (TODO 2.25).
+"""liveapisec — CLI commands (TODO 2.25).
 
-Komendy:
-  push      — utwórz/aktualizuj site + endpointy + opcjonalny token (idempotentne)
-  scan      — odpal skan; --wait czeka na wynik; --fail-on ustawia próg błędu CI
-  status    — status site'a / ostatnich skanów
-  findings  — listuj findings (--json)
-  sites     — pokaż site (endpointy, last_scan)
+Commands:
+  push      — create/update a site + endpoints + optional token (idempotent)
+  scan      — run a scan; --wait waits for the result; --fail-on sets the CI gate
+  status    — site status / recent scans
+  findings  — list findings (--json)
+  sites     — show a site (endpoints, last_scan)
 
-Przykład w CI (gate)::
+CI example (gate)::
 
     liveapisec push --name my-api --base-url https://api.example.com \\
         --endpoint "GET /users" --endpoint "POST /payments"
     liveapisec scan --site SITE_ID --branch main --commit "$SHA" --wait --fail-on high
 
-Exit codes (dla CI):
-  0 — ok (brak findings >= progu)      1 — findings >= progu (gate failed)
-  2 — błąd użycia / API
+Exit codes (for CI):
+  0 — ok (no findings >= threshold)     1 — findings >= threshold (gate failed)
+  2 — usage / API error
 """
 
 from __future__ import annotations
@@ -40,9 +40,9 @@ def _parse_endpoint(value: str) -> dict[str, str]:
 
 def _auth_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--auth-type", choices=["none", "jwt", "bearer", "cookie", "api_key"], default="none")
-    parser.add_argument("--auth-token", help="token dla jwt/bearer/api_key")
-    parser.add_argument("--auth-cookie", help="pełny nagłówek Cookie dla type=cookie")
-    parser.add_argument("--auth-header", default="X-API-Key", help="nazwa nagłówka dla api_key")
+    parser.add_argument("--auth-token", help="token for jwt/bearer/api_key")
+    parser.add_argument("--auth-cookie", help="full Cookie header for type=cookie")
+    parser.add_argument("--auth-header", default="X-API-Key", help="header name for api_key")
 
 
 def _build_auth(args: argparse.Namespace) -> dict[str, Any] | None:
@@ -231,7 +231,7 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True)
 
     def _json_flag(p: argparse.ArgumentParser) -> None:
-        # --json działa też po nazwie podkomendy (np. `findings ... --json`)
+        # --json also works after the subcommand name (e.g. `findings ... --json`)
         p.add_argument("--json", action="store_true", default=argparse.SUPPRESS, help=argparse.SUPPRESS)
 
     p_push = sub.add_parser("push", help="create/update a site (idempotent)")
