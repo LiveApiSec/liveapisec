@@ -15,7 +15,7 @@ jobs:
           python-version: "3.12"
       - name: Install
         run: |
-          pip install -e ".[dev]"
+          pip install -e ".[dev]" ruff pytest
       - name: Lint (ruff)
         run: ruff check liveapisec tests
       - name: Test

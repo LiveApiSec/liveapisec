@@ -23,6 +23,9 @@ classifiers = [
 ]
 dependencies = ["httpx>=0.24"]
 
+[project.optional-dependencies]
+dev = ["pytest>=7", "ruff>=0.5"]
+
 [project.scripts]
 liveapisec = "liveapisec.cli:main"
 
