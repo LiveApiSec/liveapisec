@@ -95,8 +95,10 @@ def test_api_error_raises_liveapisecerror() -> None:
 
 def test_missing_api_key(monkeypatch) -> None:
     monkeypatch.delenv("LIVEAPISEC_API_KEY", raising=False)
-    with pytest.raises(LiveAPISecError):
-        LiveAPISec(api_url="https://x.test", api_key=None)
+    api = LiveAPISec(api_url="https://x.test", api_key=None)
+    with pytest.raises(LiveAPISecError) as exc:
+        api.get_site("65fabc")
+    assert "Missing API key" in str(exc.value)
 
 
 # --- scans -------------------------------------------------------------------
@@ -139,14 +141,20 @@ def test_wait_for_scan_polls_until_completed(monkeypatch) -> None:
                 {
                     "scan_id": "scan123",
                     "status": status,
-                    "summary": {"tests_run": 42, "findings": 2, "by_severity": {"high": 1, "info": 1}},
+                    "summary": {
+                        "tests_run": 42,
+                        "findings": 2,
+                        "by_severity": {"high": 1, "info": 1},
+                    },
                 }
             ],
         )
 
     api = _client(handler)
     monkeypatch.setattr(
-        client_mod, "time", type("T", (), {"monotonic": lambda self: 0.0, "sleep": lambda self, s: None})()
+        client_mod,
+        "time",
+        type("T", (), {"monotonic": lambda self: 0.0, "sleep": lambda self, s: None})(),
     )
     done = api.wait_for_scan("65fabc", "scan123", poll_interval=0.01)
     assert done["status"] == "completed"
@@ -274,6 +282,20 @@ def test_cli_findings(capsys) -> None:
 
 def test_cli_main_requires_api_key(capsys, monkeypatch) -> None:
     monkeypatch.delenv("LIVEAPISEC_API_KEY", raising=False)
-    assert main(["--api-key", "", "push", "--name", "x", "--base-url", "https://x.test",
-                 "--endpoint", "GET /"]) == 2
+    assert (
+        main(
+            [
+                "--api-key",
+                "",
+                "push",
+                "--name",
+                "x",
+                "--base-url",
+                "https://x.test",
+                "--endpoint",
+                "GET /",
+            ]
+        )
+        == 2
+    )
     assert "Missing API key" in capsys.readouterr().err

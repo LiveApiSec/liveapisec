@@ -68,12 +68,6 @@ class LiveAPISec:
     ) -> None:
         self.api_url = (api_url or api_url_from_env()).rstrip("/")
         self.api_key = api_key or os.environ.get(ENV_API_KEY, "")
-        if not self.api_key:
-            raise LiveAPISecError(
-                None,
-                "Missing API key",
-                f"set {ENV_API_KEY}=las_dev_... (Settings → Developer API) or pass --api-key",
-            )
         self.timeout = timeout
         self._transport = transport
 
@@ -85,10 +79,18 @@ class LiveAPISec:
         }
 
     def _request(self, method: str, path: str, **kw: Any) -> Any:
+        if not self.api_key:
+            raise LiveAPISecError(
+                None,
+                "Missing API key",
+                f"set {ENV_API_KEY}=las_dev_... (Settings → Developer API) or pass --api-key",
+            )
         url = f"{self.api_url}{path}"
         try:
             with httpx.Client(transport=self._transport) as client:
-                resp = client.request(method, url, headers=self._headers(), timeout=self.timeout, **kw)
+                resp = client.request(
+                    method, url, headers=self._headers(), timeout=self.timeout, **kw
+                )
         except httpx.HTTPError as exc:
             raise LiveAPISecError(None, "Connection error", str(exc)) from exc
         if resp.status_code >= 400:

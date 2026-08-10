@@ -52,12 +52,39 @@ Install once (e.g. in a CI image, on a dev machine, in GitHub Actions) and the
 Generate an API key once in the dashboard: **Settings → Developer API → Create API key**
 (the `las_dev_...` key is shown only once — store it as a secret).
 
+### First run (interactive)
+
+The first time you run a command that needs the API (e.g. `push`, `scan`), the CLI
+asks for your key, shows you exactly where to find it, and **saves it** to
+`~/.config/liveapisec/config.json` (mode `0600`). Next runs pick it up automatically:
+
+```
+$ liveapisec push --name my-api --base-url https://api.example.com ...
+No LiveAPISec API key found.
+Generate one in the dashboard:  Settings → Developer API → Create API key
+  https://liveapisec.com/settings
+The key looks like:  las_dev_...
+Tip: no key = only public endpoints can be tested.
+Paste your API key: las_dev_...
+✓ API key saved to /home/you/.config/liveapisec/config.json
+```
+
+### Environment variables (recommended for CI)
+
 ```bash
 export LIVEAPISEC_API_KEY=las_dev_...          # required
 export LIVEAPISEC_API_URL=https://liveapisec.com   # optional (default)
 ```
 
-You can also pass them per command: `--api-key` / `--api-url`.
+Precedence: `--api-key` / `--api-url` flags → environment variables →
+saved config file.
+
+### Manage the saved key
+
+```bash
+liveapisec config        # show where the key is stored
+liveapisec config --clear  # remove the saved config file
+```
 
 ---
 
@@ -86,7 +113,39 @@ site 65f...abc: my-api — 2 endpoints, auth=none
 export SITE_ID=65f...abc
 ```
 
-### 2. `scan` — run a security test
+### 2. `push-code` — scan your source code and push the endpoints
+
+Point the CLI at a repo/folder and it detects the framework, extracts the API
+endpoints from the code and pushes them — no running site or OpenAPI spec needed.
+
+```bash
+cd my-project
+liveapisec push-code --dir . --name my-api --base-url https://api.example.com
+```
+
+- Auto-detected frameworks: **FastAPI**, **Flask**, **Next.js** (`app/api` +
+  `pages/api`), **Laravel**, and generic **PHP** (`$app->get`, Slim, Lumen).
+- Preview before pushing (no API key needed):
+
+```bash
+liveapisec push-code --dir . --name my-api --base-url https://api.example.com --dry-run
+liveapisec push-code --dir . --name my-api --base-url https://api.example.com --dry-run --json
+```
+
+- Force a framework if auto-detection misses it: `--framework nextjs`.
+
+Output:
+
+```
+framework: fastapi (42 files scanned)
+found 58 endpoints:
+  GET     /users
+  POST    /payments
+site 65f...abc: my-api — 58 endpoints, auth=none
+export SITE_ID=65f...abc
+```
+
+### 3. `scan` — run a security test
 
 ```bash
 # fire and forget (202, does not wait)
@@ -103,20 +162,20 @@ liveapisec scan --site SITE_ID --branch main --commit "$SHA" \
   is found; `--fail-on critical` only for criticals; omit it → always exit 0
   (except errors).
 
-### 3. `status` — site status + recent scans
+### 4. `status` — site status + recent scans
 
 ```bash
 liveapisec status --site SITE_ID
 ```
 
-### 4. `findings` — scan results
+### 5. `findings` — scan results
 
 ```bash
 liveapisec findings --site SITE_ID --scan SCAN_ID
 liveapisec findings --site SITE_ID --scan SCAN_ID --json   # raw data (for agents/AI)
 ```
 
-### 5. `sites` — site details
+### 6. `sites` — site details
 
 ```bash
 liveapisec sites --site SITE_ID

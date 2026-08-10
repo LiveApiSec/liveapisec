@@ -2,6 +2,7 @@
 
 Commands:
   push      — create/update a site + endpoints + optional token (idempotent)
+  push-code — scan source code (fastapi/flask/nextjs/laravel/php) and push endpoints
   scan      — run a scan; --wait waits for the result; --fail-on sets the CI gate
   status    — site status / recent scans
   findings  — list findings (--json)
@@ -21,10 +22,19 @@ Exit codes (for CI):
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from typing import Any
 
-from .client import DEFAULT_API_URL, LiveAPISec, LiveAPISecError
+from .client import (
+    DEFAULT_API_URL,
+    ENV_API_KEY,
+    ENV_API_URL,
+    LiveAPISec,
+    LiveAPISecError,
+)
+from .codegen import scan_code
+from .config import clear_config, config_path, load_config, save_config
 
 _SEV = ["critical", "high", "medium", "low", "info"]
 
@@ -39,7 +49,9 @@ def _parse_endpoint(value: str) -> dict[str, str]:
 
 
 def _auth_args(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--auth-type", choices=["none", "jwt", "bearer", "cookie", "api_key"], default="none")
+    parser.add_argument(
+        "--auth-type", choices=["none", "jwt", "bearer", "cookie", "api_key"], default="none"
+    )
     parser.add_argument("--auth-token", help="token for jwt/bearer/api_key")
     parser.add_argument("--auth-cookie", help="full Cookie header for type=cookie")
     parser.add_argument("--auth-header", default="X-API-Key", help="header name for api_key")
@@ -71,7 +83,12 @@ def _fmt_scan(scan: dict[str, Any]) -> str:
     if scan.get("commit"):
         parts.append(f"commit={scan['commit']}")
     if status == "completed":
-        sev = " ".join(f"{k}={v}" for k, v in sorted(by_sev.items(), key=lambda kv: _SEV.index(kv[0]) if kv[0] in _SEV else 9))
+        sev = " ".join(
+            f"{k}={v}"
+            for k, v in sorted(
+                by_sev.items(), key=lambda kv: _SEV.index(kv[0]) if kv[0] in _SEV else 9
+            )
+        )
         parts.append(f"tests={summary.get('tests_run', '?')}")
         parts.append(f"findings={summary.get('findings', 0)}" + (f" ({sev})" if sev else ""))
     return " ".join(parts)
@@ -118,7 +135,75 @@ def _cmd_push(client: LiveAPISec, args: argparse.Namespace) -> int:
         print(LiveAPISec.dump(site))
     else:
         updated = " (updated)" if site.get("updated") else ""
-        print(f"site {site['site_id']}{updated}: {site['name']} — {site['endpoints_count']} endpoints, auth={site['auth']}")
+        print(
+            f"site {site['site_id']}{updated}: {site['name']} — {site['endpoints_count']} endpoints, auth={site['auth']}"
+        )
+        print(f"export SITE_ID={site['site_id']}")
+    return 0
+
+
+def _cmd_push_code(client: LiveAPISec, args: argparse.Namespace) -> int:
+    if not args.name:
+        print("error: --name is required", file=sys.stderr)
+        return 2
+    if not args.base_url:
+        print("error: --base-url is required", file=sys.stderr)
+        return 2
+    root = args.dir or "."
+    result = scan_code(root, framework=args.framework)
+    endpoints = result.endpoints
+    if not endpoints:
+        fw = (
+            f" (framework: {result.framework})"
+            if result.framework
+            else " — could not detect a supported framework (fastapi/flask/nextjs/laravel/php)"
+        )
+        print(f"error: no endpoints found in {root}{fw}", file=sys.stderr)
+        return 2
+
+    if args.dry_run:
+        if args.json:
+            print(
+                LiveAPISec.dump(
+                    {
+                        "framework": result.framework,
+                        "files": result.files_scanned,
+                        "endpoints": endpoints,
+                    }
+                )
+            )
+        else:
+            fw = result.framework or "?"
+            print(f"framework: {fw} ({result.files_scanned} files scanned)")
+            print(f"found {len(endpoints)} endpoints (dry-run — not pushed):")
+            for e in endpoints:
+                print(f"  {e['method']:7} {e['path']}")
+        return 0
+
+    if not args.json:
+        fw = result.framework or "?"
+        print(f"framework: {fw} ({result.files_scanned} files scanned)")
+        print(f"found {len(endpoints)} endpoints:")
+        for e in endpoints:
+            print(f"  {e['method']:7} {e['path']}")
+
+    auth = _build_auth(args)
+    push_endpoints = [{"method": e["method"], "path": e["path"]} for e in endpoints]
+    site = client.create_site(
+        name=args.name,
+        base_url=args.base_url,
+        endpoints=push_endpoints,
+        project=args.project,
+        auth=auth,
+        site_id=args.site,
+    )
+    if args.json:
+        print(LiveAPISec.dump(site))
+    else:
+        updated = " (updated)" if site.get("updated") else ""
+        print(
+            f"site {site['site_id']}{updated}: {site['name']} — {site['endpoints_count']} endpoints, auth={site['auth']}"
+        )
         print(f"export SITE_ID={site['site_id']}")
     return 0
 
@@ -153,7 +238,10 @@ def _cmd_scan(client: LiveAPISec, args: argparse.Namespace) -> int:
         blocked = LiveAPISec.findings_above(findings, gate_sev)
         if blocked:
             if not args.json:
-                print(f"\n❌ {len(blocked)} finding(s) at or above {gate_sev} — gate failed:", file=sys.stderr)
+                print(
+                    f"\n❌ {len(blocked)} finding(s) at or above {gate_sev} — gate failed:",
+                    file=sys.stderr,
+                )
                 for f in blocked:
                     print("  " + _fmt_finding(f), file=sys.stderr)
             return 1
@@ -225,32 +313,59 @@ def build_parser() -> argparse.ArgumentParser:
         prog="liveapisec",
         description="LiveAPISec Developer API — push API specs, run security scans, gate your CI/CD.",
     )
-    parser.add_argument("--api-url", help=f"API base URL (default: $LIVEAPISEC_API_URL or {DEFAULT_API_URL})")
+    parser.add_argument(
+        "--api-url", help=f"API base URL (default: $LIVEAPISEC_API_URL or {DEFAULT_API_URL})"
+    )
     parser.add_argument("--api-key", help="dev API key las_dev_... (default: $LIVEAPISEC_API_KEY)")
     parser.add_argument("--json", action="store_true", help="print raw JSON output")
     sub = parser.add_subparsers(dest="command", required=True)
 
     def _json_flag(p: argparse.ArgumentParser) -> None:
         # --json also works after the subcommand name (e.g. `findings ... --json`)
-        p.add_argument("--json", action="store_true", default=argparse.SUPPRESS, help=argparse.SUPPRESS)
+        p.add_argument(
+            "--json", action="store_true", default=argparse.SUPPRESS, help=argparse.SUPPRESS
+        )
 
     p_push = sub.add_parser("push", help="create/update a site (idempotent)")
     p_push.add_argument("--name", required=True)
     p_push.add_argument("--base-url")
     p_push.add_argument("--project")
-    p_push.add_argument("--endpoint", action="append", type=_parse_endpoint, help="'METHOD /path' (repeatable)")
+    p_push.add_argument(
+        "--endpoint", action="append", type=_parse_endpoint, help="'METHOD /path' (repeatable)"
+    )
     p_push.add_argument("--openapi-url", help="URL to OpenAPI spec instead of --endpoint")
     p_push.add_argument("--site", help="existing site_id to update (PUT)")
     _auth_args(p_push)
     _json_flag(p_push)
     p_push.set_defaults(func=_cmd_push)
 
+    p_code = sub.add_parser(
+        "push-code",
+        help="scan source code for endpoints and push them (fastapi/flask/nextjs/laravel/php)",
+    )
+    p_code.add_argument("--dir", default=".", help="project directory or file to scan (default: .)")
+    p_code.add_argument(
+        "--framework",
+        choices=["fastapi", "flask", "nextjs", "laravel", "php"],
+        help="force framework (default: auto-detect)",
+    )
+    p_code.add_argument("--name", required=True)
+    p_code.add_argument("--base-url", required=True)
+    p_code.add_argument("--project")
+    p_code.add_argument("--site", help="existing site_id to update (PUT)")
+    p_code.add_argument("--dry-run", action="store_true", help="scan + list endpoints, do not push")
+    _auth_args(p_code)
+    _json_flag(p_code)
+    p_code.set_defaults(func=_cmd_push_code)
+
     p_scan = sub.add_parser("scan", help="run a security scan (optionally wait + gate)")
     p_scan.add_argument("--site", required=True)
     p_scan.add_argument("--branch")
     p_scan.add_argument("--commit")
     p_scan.add_argument("--wait", action="store_true", help="poll until finished")
-    p_scan.add_argument("--fail-on", choices=_SEV, help="exit 1 if findings at/above this severity (default: high)")
+    p_scan.add_argument(
+        "--fail-on", choices=_SEV, help="exit 1 if findings at/above this severity (default: high)"
+    )
     p_scan.add_argument("--poll-interval", type=float, default=3.0)
     p_scan.add_argument("--timeout", type=float, default=600.0)
     _json_flag(p_scan)
@@ -272,23 +387,88 @@ def build_parser() -> argparse.ArgumentParser:
     _json_flag(p_sites)
     p_sites.set_defaults(func=_cmd_sites)
 
+    p_config = sub.add_parser("config", help="show / manage saved config (API key)")
+    p_config.add_argument("--clear", action="store_true", help="remove the saved config file")
+    p_config.set_defaults(func=_cmd_config)
+
     return parser
+
+
+def _needs_key(args: argparse.Namespace) -> bool:
+    if args.command == "config":
+        return False
+    return not (args.command == "push-code" and getattr(args, "dry_run", False))
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     args.json = bool(getattr(args, "json", False))
+
+    cfg = load_config()
+    api_key = args.api_key or os.environ.get(ENV_API_KEY) or cfg.get("api_key") or ""
+    api_url = args.api_url or os.environ.get(ENV_API_URL) or cfg.get("api_url") or None
+
+    if not api_key and _needs_key(args) and sys.stdin.isatty() and not args.json:
+        api_key = _prompt_for_key()
+        saved = save_config({"api_key": api_key, "api_url": api_url or ""})
+        print(f"✓ API key saved to {saved}", file=sys.stderr)
+
     try:
-        client = LiveAPISec(api_url=args.api_url, api_key=args.api_key)
-    except LiveAPISecError as exc:
-        print(f"error: {exc}", file=sys.stderr)
-        return 2
-    try:
+        client = LiveAPISec(api_url=api_url, api_key=api_key)
         return int(args.func(client, args))
     except LiveAPISecError as exc:
+        if _is_missing_key(exc) and sys.stdin.isatty() and not args.json and not api_key:
+            api_key = _prompt_for_key()
+            saved = save_config({"api_key": api_key, "api_url": api_url or ""})
+            print(f"✓ API key saved to {saved}", file=sys.stderr)
+            try:
+                client = LiveAPISec(api_url=api_url, api_key=api_key)
+                return int(args.func(client, args))
+            except LiveAPISecError as exc2:
+                print(f"error: {exc2}", file=sys.stderr)
+                return 2
         print(f"error: {exc}", file=sys.stderr)
         return 2
+
+
+def _is_missing_key(exc: LiveAPISecError) -> bool:
+    return exc.title == "Missing API key"
+
+
+def _prompt_for_key() -> str:
+    """Interactive first-run: explain where to find the key and read it."""
+    print("No LiveAPISec API key found.", file=sys.stderr)
+    print(
+        "Generate one in the dashboard:  Settings → Developer API → Create API key", file=sys.stderr
+    )
+    print(f"  {DEFAULT_API_URL}/settings", file=sys.stderr)
+    print("The key looks like:  las_dev_...", file=sys.stderr)
+    print("Tip: no key = only public endpoints can be tested.", file=sys.stderr)
+    try:
+        value = input("Paste your API key: ").strip()
+    except (EOFError, KeyboardInterrupt):
+        raise LiveAPISecError(None, "Missing API key", "no key provided") from None
+    if not value:
+        raise LiveAPISecError(None, "Missing API key", "no key provided")
+    return value
+
+
+def _cmd_config(client: LiveAPISec, args: argparse.Namespace) -> int:
+    path = config_path()
+    cfg = load_config()
+    if args.clear:
+        clear_config()
+        print(f"removed config: {path}")
+        return 0
+    print(f"config: {path}")
+    print(f"api_key: {'set' if cfg.get('api_key') else 'not set'}")
+    print(f"api_url: {cfg.get('api_url') or '(default ' + DEFAULT_API_URL + ')'}")
+    print()
+    print("Where to find your key:  Settings → Developer API → Create API key")
+    print(f"  {DEFAULT_API_URL}/settings")
+    print("You can also set the environment variables LIVEAPISEC_API_KEY / LIVEAPISEC_API_URL.")
+    return 0
 
 
 if __name__ == "__main__":

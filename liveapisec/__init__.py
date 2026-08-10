@@ -18,14 +18,23 @@ from .client import (
     ScanStatus,
     severity_rank,
 )
+from .codegen import ScanResult, detect_framework, scan_code
+from .config import clear_config, config_path, load_config, save_config
 
-__version__ = "0.1.1"
+__version__ = "0.1.3"
 
 __all__ = [
     "DEFAULT_API_URL",
     "LiveAPISecError",
+    "ScanResult",
     "ScanStatus",
     "__version__",
+    "clear_config",
+    "config_path",
+    "detect_framework",
+    "load_config",
     "main",
+    "save_config",
+    "scan_code",
     "severity_rank",
 ]
