@@ -538,6 +538,56 @@ def test_cli_findings(capsys) -> None:
     assert "[MEDIUM] Rate limit" in capsys.readouterr().out
 
 
+def test_cli_scans_lists_history_and_summarizes(capsys) -> None:
+    from liveapisec.cli import _cmd_scans
+
+    class Client:
+        def list_scans(self, site):
+            return [
+                {
+                    "scan_id": "s3",
+                    "status": "completed",
+                    "branch": "main",
+                    "commit": "abc",
+                    "summary": {"tests_run": 42, "findings": 3, "by_severity": {"high": 1, "medium": 2}},
+                },
+                {"scan_id": "s2", "status": "failed", "branch": "main"},
+                {"scan_id": "s1", "status": "completed", "summary": {"tests_run": 5, "findings": 0}},
+            ]
+
+    class Args:
+        site = "65f"
+        limit = 20
+        json = False
+
+    assert _cmd_scans(Client(), Args()) == 0
+    out = capsys.readouterr().out
+    assert "s3" in out and "s2" in out and "s1" in out
+    assert "status=completed" in out
+    assert "tests=42" in out and "findings=3" in out
+    assert "high=1 medium=2" in out
+    assert "status=failed" in out
+
+    class Args:
+        site = "65f"
+        limit = 1
+        json = False
+
+    assert _cmd_scans(Client(), Args()) == 0
+    out = capsys.readouterr().out
+    assert "more (use --json for all)" in out
+
+    class Args:
+        site = "65f"
+        limit = 20
+        json = True
+
+    assert _cmd_scans(Client(), Args()) == 0
+    import json as _json
+
+    assert len(_json.loads(capsys.readouterr().out)) == 3
+
+
 # --- OAuth2 auth + --verify --------------------------------------------------
 def test_build_auth_oauth2() -> None:
     class Args:

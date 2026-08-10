@@ -291,7 +291,22 @@ liveapisec findings --site SITE_ID --scan SCAN_ID --json   # raw data (for agent
 liveapisec sites --site SITE_ID
 ```
 
-### 7. `projects` — last test status per project (no dashboard needed)
+### 7. `scans` — full test (scan) history for a site
+
+See every security test ever run on a site (status, branch/commit, tests run,
+findings by severity) — useful for an agent that wants to know what was tested,
+when, and with what result:
+
+```bash
+liveapisec scans --site SITE_ID
+# scan 65f...001  status=completed  branch=main  commit=abc  tests=42  findings=3 (high=1 medium=2)
+# scan 65f...002  status=failed     branch=main
+
+liveapisec scans --site SITE_ID --json        # raw list (for scripts / agents)
+liveapisec scans --site SITE_ID --limit 5     # only the 5 most recent
+```
+
+### 8. `projects` — last test status per project (no dashboard needed)
 
 See every project, its sites and the **last security test result** straight in the
 terminal — no need to open the dashboard:
@@ -413,36 +428,50 @@ Windsurf…) to let it use the LiveAPISec CLI on your behalf.
 
 ````markdown
 You can use the `liveapisec` CLI (https://pypi.org/project/liveapisec/) to
-push API specifications and run security scans against the LiveAPISec platform.
+push API specifications, run security scans and read results against the
+LiveAPISec platform. It works with APIs in ANY language/framework (not just
+Python) — use `push-code` to extract endpoints from source, or
+`push --openapi-url` for an OpenAPI spec.
 
 Environment:
 - `LIVEAPISEC_API_KEY` — dev API key (las_dev_...), usually already set.
 - `LIVEAPISEC_API_URL` — API base URL (default: https://liveapisec.com).
 - `SITE_ID` — the site id returned by `liveapisec push` / `liveapisec sites`.
 
+Fetch information about the portal (to diagnose and fix issues):
+- `liveapisec projects`              — every project + last test status
+- `liveapisec scans --site <id>`    — full test history for a site (--json for raw)
+- `liveapisec status --site <id>`   — site status + recent scans
+- `liveapisec sites --site <id>`    — site details
+- `liveapisec findings --site <id> --scan <scan_id>`  — findings (--json for raw)
+
 Language note: the CLI is written in Python, but it tests APIs built in ANY
 language/framework — Python, Node.js, Go, Rust, Java, PHP, Ruby, .NET, etc.
 Use `liveapisec push-code` to auto-extract endpoints from the source
 (FastAPI, Flask, Django, Next.js, NestJS, Express, Laravel, PHP/Slim, Spring,
 Go, Rust), or `push --openapi-url` for any API that exposes an OpenAPI spec.
-If your stack is not Python, you can call the same Developer REST API directly
-from your language (see the SDK section).
 
 Workflow:
 1. Push the API under test (idempotent — safe to repeat):
    `liveapisec push --name <name> --base-url <url> --endpoint "METHOD /path" [--endpoint ...] [--openapi-url <url>] [--auth-type jwt|bearer|cookie|api_key --auth-token <token>]`
-2. Read the site id from the output (or `liveapisec sites --site <id>`).
-3. Run a security scan and wait for the result:
+2. Run a security scan and wait for the result:
    `liveapisec scan --site <site_id> --branch <branch> --commit <sha> --wait`
-4. Read findings:
+3. Read findings (severity, title, target):
    `liveapisec findings --site <site_id> --scan <scan_id>` (add `--json` for raw JSON).
-5. Check site status: `liveapisec status --site <site_id>`.
-6. See every project + last test status: `liveapisec projects` (or `--json`).
+
+Self-repair loop (fix an issue from our test, end-to-end):
+1. See what failed: `liveapisec projects`
+2. Find the failed scan: `liveapisec scans --site <site_id>`
+3. Read the findings: `liveapisec findings --site <site_id> --scan <scan_id> --json`
+4. Fix the code (e.g. add a security-header middleware), commit.
+5. Re-push (idempotent) and re-run the gate:
+   `liveapisec push --name <name> --base-url <url> --endpoint "GET /x"`
+   `liveapisec scan --site <site_id> --branch <branch> --commit <sha> --wait --fail-on high`
+6. Confirm the gate is green: `liveapisec projects`
 
 Rules:
 - Never print or commit the API key; use the environment variable.
-- If a scan fails, read `liveapisec findings --site <id> --scan <scan_id> --json`
-  and summarize each finding (severity, title, target).
+- If a scan fails, read the findings, fix the code, re-push and re-scan.
 - Push is idempotent, so re-running it is always safe.
 - Exit code 1 from `scan --wait --fail-on <sev>` means the gate failed
   (findings at/above that severity); exit 2 means usage/API error.

@@ -653,6 +653,26 @@ def _cmd_status(client: LiveAPISec, args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_scans(client: LiveAPISec, args: argparse.Namespace) -> int:
+    """List scan history for a site — lets a Copilot/agent see every test result."""
+    if not args.site:
+        print("error: --site (site_id) is required", file=sys.stderr)
+        return 2
+    scans = client.list_scans(args.site)
+    if args.json:
+        print(LiveAPISec.dump(scans))
+        return 0
+    if not scans:
+        print("no scans yet")
+        return 0
+    limit = getattr(args, "limit", 20)
+    for s in scans[:limit]:
+        print("  " + _fmt_scan(s))
+    if len(scans) > limit:
+        print(_dim(f"  …and {len(scans) - limit} more (use --json for all)"))
+    return 0
+
+
 def _cmd_findings(client: LiveAPISec, args: argparse.Namespace) -> int:
     if not args.site or not args.scan:
         print("error: --site and --scan are required", file=sys.stderr)
@@ -828,6 +848,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_status.add_argument("--site", required=True)
     _json_flag(p_status)
     p_status.set_defaults(func=_cmd_status)
+
+    p_scans = sub.add_parser("scans", help="list security test (scan) history for a site")
+    p_scans.add_argument("--site", required=True)
+    p_scans.add_argument("--limit", type=int, default=20, help="max rows to show (default: 20)")
+    _json_flag(p_scans)
+    p_scans.set_defaults(func=_cmd_scans)
 
     p_find = sub.add_parser("findings", help="list findings for a scan")
     p_find.add_argument("--site", required=True)
