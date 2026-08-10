@@ -41,6 +41,11 @@ BFFs, API gateways, third-party APIs… public or protected (jwt / bearer /
 cookie / api_key / OAuth2). `push-code` reads the HTTP routes; the app behind
 them can be anything.
 
+**API types we can test:** REST (OpenAPI / Swagger), **RAML**, **GraphQL**
+(introspection or SDL) and **SOAP** (WSDL) — the scanner converts each into
+real HTTP targets. **WebSocket** and **gRPC** are not covered by the HTTP
+scanner (non-HTTP protocols).
+
 **Integration & SDK:** the package also ships a **Python SDK**
 (`from liveapisec import LiveAPISec`), and the same Developer API is a plain
 **REST** API you can call from **any language** (curl, Node `fetch`, Go…) — the
