@@ -104,6 +104,16 @@ def _severe(sev: str) -> str:
     return colors.get(sev, _dim)(sev.upper())
 
 
+def _scan_status(status: str) -> str:
+    if status == "completed":
+        return _green(status)
+    if status == "failed":
+        return _red(status)
+    if status in ("queued", "running"):
+        return _yellow(status)
+    return _dim(status or "?")
+
+
 def _print_endpoints(endpoints: list[dict[str, str]], limit: int = 25) -> None:
     """Print endpoints aligned; summarize huge lists (performance / readability)."""
     shown = endpoints[:limit]
@@ -659,6 +669,55 @@ def _cmd_findings(client: LiveAPISec, args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_projects(client: LiveAPISec, args: argparse.Namespace) -> int:
+    """List projects + sites + last scan status — results straight in the terminal."""
+    sites = client.list_sites()
+    if args.json:
+        print(LiveAPISec.dump(sites))
+        return 0
+    if not sites:
+        print(_yellow("no projects yet — push a site first"))
+        return 0
+
+    def _last_line(s: dict[str, Any]) -> str:
+        name = s.get("name") or "?"
+        url = s.get("base_url") or ""
+        last = s.get("last_scan")
+        if not last or not last.get("status"):
+            return f"  {name}  {_dim(url)}  {_dim('no test yet')}"
+        status = last.get("status") or "?"
+        parts = [f"last test: {_scan_status(status)}"]
+        if last.get("tests_run") is not None:
+            parts.append(f"{last['tests_run']} tests")
+        if last.get("findings"):
+            sev = last.get("by_severity") or {}
+            sev_str = " ".join(
+                f"{k}={v}"
+                for k, v in sorted(
+                    sev.items(), key=lambda kv: _SEV.index(kv[0]) if kv[0] in _SEV else 9
+                )
+            )
+            parts.append(f"{last['findings']} findings" + (f" ({sev_str})" if sev_str else ""))
+        return f"  {name}  {_dim(url)}  {_dim(' · '.join(parts))}"
+
+    if args.project:
+        groups: dict[str, list[dict[str, Any]]] = {args.project: []}
+        for s in sites:
+            if (s.get("project") or "(no project)") == args.project:
+                groups[args.project].append(s)
+    else:
+        groups: dict[str, list[dict[str, Any]]] = {}
+        for s in sites:
+            groups.setdefault(s.get("project") or "(no project)", []).append(s)
+
+    for project in sorted(groups):
+        print(_bold(project))
+        for s in groups[project]:
+            print(_last_line(s))
+        print()
+    return 0
+
+
 def _cmd_sites(client: LiveAPISec, args: argparse.Namespace) -> int:
     if not args.site:
         print("error: --site (site_id) is required", file=sys.stderr)
@@ -780,6 +839,14 @@ def build_parser() -> argparse.ArgumentParser:
     p_sites.add_argument("--site", required=True)
     _json_flag(p_sites)
     p_sites.set_defaults(func=_cmd_sites)
+
+    p_projects = sub.add_parser(
+        "projects",
+        help="list projects with sites and the last test status — results straight in the terminal",
+    )
+    p_projects.add_argument("--project", help="only show this project")
+    _json_flag(p_projects)
+    p_projects.set_defaults(func=_cmd_projects)
 
     p_config = sub.add_parser("config", help="show / manage saved config (API key)")
     p_config.add_argument("--clear", action="store_true", help="remove the saved config file")

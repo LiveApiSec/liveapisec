@@ -253,6 +253,31 @@ liveapisec findings --site SITE_ID --scan SCAN_ID --json   # raw data (for agent
 liveapisec sites --site SITE_ID
 ```
 
+### 7. `projects` — last test status per project (no dashboard needed)
+
+See every project, its sites and the **last security test result** straight in the
+terminal — no need to open the dashboard:
+
+```
+$ liveapisec projects
+svc
+  api-a  https://a.example.com  last test: completed · 42 tests · 3 findings (high=1 medium=2)
+  api-b  https://b.example.com  last test: failed
+mobile
+  api-c  https://c.example.com  last test: no test yet
+
+# JSON (for scripts / agents)
+liveapisec projects --json
+
+# Only one project
+liveapisec projects --project svc
+```
+
+---
+
+> **Full documentation:** see the in-browser docs at **https://liveapisec.com/docs**
+> (install, config, every command, auth/OAuth2, exit codes, GitHub Actions, SDK).
+
 ---
 
 ## GitHub Actions — full example (gate on push)
@@ -343,6 +368,7 @@ Workflow:
 4. Read findings:
    `liveapisec findings --site <site_id> --scan <scan_id>` (add `--json` for raw JSON).
 5. Check site status: `liveapisec status --site <site_id>`.
+6. See every project + last test status: `liveapisec projects` (or `--json`).
 
 Rules:
 - Never print or commit the API key; use the environment variable.

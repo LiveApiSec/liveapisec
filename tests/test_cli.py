@@ -339,6 +339,87 @@ def test_list_sites_sdk() -> None:
     assert sites == [{"site_id": "a", "project": "svc"}]
 
 
+def test_cli_projects_groups_and_shows_last_scan(capsys) -> None:
+    from liveapisec.cli import _cmd_projects
+
+    class Client:
+        def list_sites(self):
+            return [
+                {
+                    "site_id": "a",
+                    "name": "api-a",
+                    "project": "svc",
+                    "base_url": "https://a.test",
+                    "last_scan": {
+                        "status": "completed",
+                        "tests_run": 42,
+                        "findings": 3,
+                        "by_severity": {"high": 1, "medium": 2},
+                    },
+                },
+                {
+                    "site_id": "b",
+                    "name": "api-b",
+                    "project": "svc",
+                    "base_url": "https://b.test",
+                    "last_scan": {"status": "failed"},
+                },
+                {
+                    "site_id": "c",
+                    "name": "api-c",
+                    "project": "mobile",
+                    "base_url": "https://c.test",
+                    "last_scan": None,
+                },
+            ]
+
+    class Args:
+        project = None
+        json = False
+
+    assert _cmd_projects(Client(), Args()) == 0
+    out = capsys.readouterr().out
+    assert "svc" in out and "mobile" in out
+    assert "api-a" in out and "api-b" in out and "api-c" in out
+    assert "completed" in out
+    assert "42 tests" in out
+    assert "3 findings" in out
+    assert "high=1 medium=2" in out
+    assert "failed" in out
+    assert "no test yet" in out
+
+
+def test_cli_projects_json_and_filter(capsys) -> None:
+    from liveapisec.cli import _cmd_projects
+
+    sites = [
+        {"site_id": "a", "project": "svc", "last_scan": None},
+        {"site_id": "b", "project": "mobile", "last_scan": None},
+    ]
+
+    class Client:
+        def list_sites(self):
+            return sites
+
+    class Args:
+        project = None
+        json = True
+
+    assert _cmd_projects(Client(), Args()) == 0
+    import json as _json
+
+    assert _json.loads(capsys.readouterr().out) == sites
+
+    class Args:
+        project = "mobile"
+        json = False
+
+    assert _cmd_projects(Client(), Args()) == 0
+    out = capsys.readouterr().out
+    assert "mobile" in out
+    assert "svc" not in out
+
+
 def test_push_interactive_picks_existing_site(monkeypatch, capsys) -> None:
     import sys as _sys
 
