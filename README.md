@@ -13,13 +13,24 @@ use it in any project, script and CI/CD pipeline — no dashboard, no curl.
 
 ## Installation
 
-From PyPI (recommended):
+### One command (Linux / macOS) — recommended
 
 ```bash
-pip install liveapisec
+curl -fsSL https://raw.githubusercontent.com/LiveApiSec/liveapisec/main/install.sh | bash
 ```
 
-From GitHub (if you prefer building from the repository):
+The installer uses `pipx` when available, otherwise it creates an isolated
+virtualenv and symlinks the command into `~/.local/bin` — no `sudo`, and it
+works on PEP 668 systems (Ubuntu 24.04+) where a plain `pip install` is
+blocked. After installing, open a new terminal and run `liveapisec --help`.
+
+### From PyPI (recommended for developers with pipx/venv)
+
+```bash
+pipx install liveapisec     # or: pip install liveapisec (inside a venv)
+```
+
+### From GitHub (if you prefer building from the repository)
 
 ```bash
 pip install "liveapisec @ git+https://github.com/LiveApiSec/liveapisec.git"
