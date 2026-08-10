@@ -5,7 +5,7 @@ on:
     tags: ["v*"]
 
 permissions:
-  id-token: write
+  id-token: write # do Trusted Publishing (fallback, gdy brak PYPI_API_TOKEN)
   contents: read
 
 jobs:
@@ -20,8 +20,18 @@ jobs:
         run: |
           pip install build
           python -m build
-      # Trusted Publishing — token z PyPI (project: liveapisec) bez sekretów.
-      - name: Publish to PyPI
+      # Publikacja na PyPI:
+      #  1) token API z PyPI jako sekret PYPI_API_TOKEN (username: __token__),
+      #  2) fallback: Trusted Publishing (OIDC, bez sekretów).
+      - name: Publish to PyPI (API token)
+        if: secrets.PYPI_API_TOKEN != ''
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist
+          username: __token__
+          password: ${{ secrets.PYPI_API_TOKEN }}
+      - name: Publish to PyPI (Trusted Publishing)
+        if: secrets.PYPI_API_TOKEN == ''
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: dist
