@@ -39,6 +39,150 @@ from .config import clear_config, config_path, load_config, save_config
 _SEV = ["critical", "high", "medium", "low", "info"]
 
 
+# ---------------------------------------------------------------------------
+# Terminal UI — Claude Code-style layout. Auto-disabled when stdout is not a
+# TTY (CI, pipes) or when $NO_COLOR is set; force with $FORCE_COLOR=1.
+# ---------------------------------------------------------------------------
+def _color_enabled() -> bool:
+    if os.environ.get("NO_COLOR"):
+        return False
+    if os.environ.get("FORCE_COLOR"):
+        return True
+    return bool(sys.stdout.isatty())
+
+
+_C = _color_enabled()
+
+
+def _paint(code: str, text: str) -> str:
+    return f"\033[{code}m{text}\033[0m" if _C else text
+
+
+def _green(s: str) -> str:
+    return _paint("32", s)
+
+
+def _red(s: str) -> str:
+    return _paint("31", s)
+
+
+def _yellow(s: str) -> str:
+    return _paint("33", s)
+
+
+def _cyan(s: str) -> str:
+    return _paint("36", s)
+
+
+def _magenta(s: str) -> str:
+    return _paint("35", s)
+
+
+def _bold(s: str) -> str:
+    return _paint("1", s)
+
+
+def _dim(s: str) -> str:
+    return _paint("2", s)
+
+
+# Claude Code-style glyphs.
+_OK = _green("✓")
+_BAD = _red("✗")
+_WARN = _yellow("⚠")
+_ARROW = _cyan("→")
+
+
+def _severe(sev: str) -> str:
+    colors = {
+        "critical": _red,
+        "high": _red,
+        "medium": _yellow,
+        "low": _cyan,
+        "info": _dim,
+    }
+    return colors.get(sev, _dim)(sev.upper())
+
+
+def _print_endpoints(endpoints: list[dict[str, str]], limit: int = 25) -> None:
+    """Print endpoints aligned; summarize huge lists (performance / readability)."""
+    shown = endpoints[:limit]
+    for e in shown:
+        print(f"  {_cyan(e['method']):7} {e['path']}")
+    if len(endpoints) > limit:
+        print(_dim(f"  …and {len(endpoints) - limit} more endpoint(s) (use --json for all)"))
+
+
+def _scan_targets_note(count: int) -> None:
+    """Transparent note when pushing more targets than a single scan will test."""
+    if count > 25:
+        print(
+            _dim(
+                "  note: a single scan runs up to 25 targets (server SCANNER_MAX_TARGETS) — "
+                "raise it for bigger APIs."
+            ),
+            file=sys.stderr,
+        )
+
+
+# ---------------------------------------------------------------------------
+# Interactive pickers — when --project / --site are not given and stdin is a TTY:
+# show the projects/sites available for the API key and let the user pick one
+# or create a new one (Claude Code-style menus).
+# ---------------------------------------------------------------------------
+def _input_line(prompt: str) -> str:
+    try:
+        return input(prompt).strip()
+    except (EOFError, KeyboardInterrupt):
+        return ""
+
+
+def _group_projects(sites: list[dict[str, Any]]) -> list[tuple[str, list[dict[str, Any]]]]:
+    groups: dict[str, list[dict[str, Any]]] = {}
+    for s in sites:
+        groups.setdefault(s.get("project") or "(no project)", []).append(s)
+    return sorted(groups.items())
+
+
+def _pick_project(sites: list[dict[str, Any]]) -> str | None:
+    """Interactive menu: pick an existing project or type a new one."""
+    groups = _group_projects(sites)
+    print(_cyan("No --project given. Pick a project (or create a new one):"))
+    for i, (name, items) in enumerate(groups, 1):
+        print(f"  {_bold(str(i))}) {name}  {_dim(f'({len(items)} site(s))')}")
+    new_idx = len(groups) + 1
+    print(f"  {_bold(str(new_idx))}) {_green('create new project')}")
+    choice = _input_line("Enter number or project name: ")
+    if choice.isdigit():
+        idx = int(choice)
+        if 1 <= idx <= len(groups):
+            return groups[idx - 1][0]
+        if idx == new_idx:
+            name = _input_line("New project name: ")
+            return name or None
+        return None
+    if choice:
+        return choice
+    return None
+
+
+def _pick_site(sites: list[dict[str, Any]], project: str) -> dict[str, Any] | None:
+    """Interactive menu: pick an existing site in the project or add a new URL.
+    Returns the chosen site dict, or None = add a new URL."""
+    mine = [s for s in sites if (s.get("project") or "(no project)") == project]
+    print(_cyan(f"Now pick a site/URL in '{project}' (or add a new one):"))
+    for i, s in enumerate(mine, 1):
+        print(f"  {_bold(str(i))}) {s.get('name') or '?'}  {_dim(s.get('base_url') or '')}")
+    new_idx = len(mine) + 1
+    print(f"  {_bold(str(new_idx))}) {_green('add new URL/site')}")
+    choice = _input_line("Enter number: ")
+    if choice.isdigit():
+        idx = int(choice)
+        if 1 <= idx <= len(mine):
+            return mine[idx - 1]
+    return None
+
+
 def _parse_endpoint(value: str) -> dict[str, str]:
     """'GET /users' → {"method":"GET","path":"/users"}."""
     parts = value.split(None, 1)
@@ -202,17 +346,50 @@ def _fmt_finding(f: dict[str, Any]) -> str:
     sev = f.get("severity", "?")
     title = f.get("title") or f.get("category") or "?"
     target = f.get("target") or ""
-    line = f"[{sev}] {title}"
+    line = f"[{_severe(sev)}] {title}"
     if target:
-        line += f"  ({target})"
+        line += _dim(f"  ({target})")
     return line
 
 
 def _cmd_push(client: LiveAPISec, args: argparse.Namespace) -> int:
-    if not args.name:
+    interactive = sys.stdin.isatty() and not args.json and not args.verify
+    sites: list[dict[str, Any]] = []
+    if interactive and (not args.project or not args.site):
+        try:
+            sites = client.list_sites()
+        except LiveAPISecError:
+            sites = []
+
+    # --- project -----------------------------------------------------------
+    project = args.project
+    if not project and interactive:
+        project = _pick_project(sites)
+        if not project:
+            print("error: no project chosen", file=sys.stderr)
+            return 2
+
+    # --- site / URL ----------------------------------------------------------
+    site_id = args.site
+    site_name = args.name
+    site_base = args.base_url
+    if not site_id and interactive:
+        existing = _pick_site(sites, project) if project else None
+        if existing:
+            site_id = existing.get("site_id")
+            site_name = existing.get("name") or site_name
+            site_base = existing.get("base_url") or site_base
+            print(_dim(f"→ updating existing site {existing.get('name') or site_id}"))
+        else:
+            if not site_name:
+                site_name = _input_line("Site name: ")
+            if not site_base:
+                site_base = _input_line("Base URL (https://...): ")
+
+    if not site_name and not site_id:
         print("error: --name is required", file=sys.stderr)
         return 2
-    if not args.base_url and not args.site:
+    if not site_base and not site_id:
         print("error: --base-url is required", file=sys.stderr)
         return 2
     if not args.endpoint and not args.openapi_url:
@@ -225,24 +402,27 @@ def _cmd_push(client: LiveAPISec, args: argparse.Namespace) -> int:
         return 2
 
     site = client.create_site(
-        name=args.name,
-        base_url=args.base_url,
+        name=site_name,
+        base_url=site_base,
         endpoints=args.endpoint,
         openapi_url=args.openapi_url,
-        project=args.project,
+        project=project,
         auth=auth,
-        site_id=args.site,
+        site_id=site_id,
     )
     if args.json:
         print(LiveAPISec.dump(site))
     else:
         updated = " (updated)" if site.get("updated") else ""
         print(
-            f"site {site['site_id']}{updated}: {site['name']} — {site['endpoints_count']} endpoints, auth={site['auth']}"
+            _green(
+                f"{_OK} site {site['site_id']}{updated}: {site['name']} — {site['endpoints_count']} endpoints, auth={site['auth']}"
+            )
         )
-        print(f"export SITE_ID={site['site_id']}")
+        print(_dim(f"  export SITE_ID={site['site_id']}"))
+        _scan_targets_note(len(args.endpoint or []))
     if args.verify and not args.json:
-        return _verify_target(args.base_url, args.endpoint or [], auth)
+        return _verify_target(site_base, args.endpoint or [], auth)
     return 0
 
 
@@ -275,12 +455,6 @@ def _clone_repo(url: str) -> str:
 
 
 def _cmd_push_code(client: LiveAPISec, args: argparse.Namespace) -> int:
-    if not args.name:
-        print("error: --name is required", file=sys.stderr)
-        return 2
-    if not args.base_url:
-        print("error: --base-url is required", file=sys.stderr)
-        return 2
     root = args.dir or "."
     tmp: str | None = None
     if args.repo:
@@ -320,18 +494,55 @@ def _cmd_push_code(client: LiveAPISec, args: argparse.Namespace) -> int:
             )
         else:
             fw = result.framework or "?"
-            print(f"framework: {fw} ({result.files_scanned} files scanned)")
-            print(f"found {len(endpoints)} endpoints (dry-run — not pushed):")
-            for e in endpoints:
-                print(f"  {e['method']:7} {e['path']}")
+            print(f"{_ARROW} {_bold(fw)} ({_dim(str(result.files_scanned) + ' files scanned')})")
+            print(_yellow(f"found {len(endpoints)} endpoints (dry-run — not pushed):"))
+            _print_endpoints(endpoints)
         return 0
 
     if not args.json:
         fw = result.framework or "?"
-        print(f"framework: {fw} ({result.files_scanned} files scanned)")
+        print(f"{_ARROW} {_bold(fw)} ({_dim(str(result.files_scanned) + ' files scanned')})")
         print(f"found {len(endpoints)} endpoints:")
-        for e in endpoints:
-            print(f"  {e['method']:7} {e['path']}")
+        _print_endpoints(endpoints)
+
+    # --- interactive: resolve project + site/URL when flags are missing --------
+    interactive = sys.stdin.isatty() and not args.json and not args.verify
+    sites: list[dict[str, Any]] = []
+    if interactive and (not args.project or not args.site):
+        try:
+            sites = client.list_sites()
+        except LiveAPISecError:
+            sites = []
+
+    project = args.project
+    if not project and interactive:
+        project = _pick_project(sites)
+        if not project:
+            print("error: no project chosen", file=sys.stderr)
+            return 2
+
+    site_id = args.site
+    site_name = args.name
+    site_base = args.base_url
+    if not site_id and interactive:
+        existing = _pick_site(sites, project) if project else None
+        if existing:
+            site_id = existing.get("site_id")
+            site_name = existing.get("name") or site_name
+            site_base = existing.get("base_url") or site_base
+            print(_dim(f"→ updating existing site {existing.get('name') or site_id}"))
+        else:
+            if not site_name:
+                site_name = _input_line("Site name: ")
+            if not site_base:
+                site_base = _input_line("Base URL (https://...): ")
+
+    if not site_name and not site_id:
+        print("error: --name is required", file=sys.stderr)
+        return 2
+    if not site_base and not site_id:
+        print("error: --base-url is required", file=sys.stderr)
+        return 2
 
     auth = _build_auth(args)
     err = _validate_auth(args, auth)
@@ -340,23 +551,26 @@ def _cmd_push_code(client: LiveAPISec, args: argparse.Namespace) -> int:
         return 2
     push_endpoints = [{"method": e["method"], "path": e["path"]} for e in endpoints]
     site = client.create_site(
-        name=args.name,
-        base_url=args.base_url,
+        name=site_name,
+        base_url=site_base,
         endpoints=push_endpoints,
-        project=args.project,
+        project=project,
         auth=auth,
-        site_id=args.site,
+        site_id=site_id,
     )
     if args.json:
         print(LiveAPISec.dump(site))
     else:
         updated = " (updated)" if site.get("updated") else ""
         print(
-            f"site {site['site_id']}{updated}: {site['name']} — {site['endpoints_count']} endpoints, auth={site['auth']}"
+            _green(
+                f"{_OK} site {site['site_id']}{updated}: {site['name']} — {site['endpoints_count']} endpoints, auth={site['auth']}"
+            )
         )
-        print(f"export SITE_ID={site['site_id']}")
+        print(_dim(f"  export SITE_ID={site['site_id']}"))
+        _scan_targets_note(len(endpoints))
     if args.verify and not args.json:
-        return _verify_target(args.base_url, push_endpoints, auth)
+        return _verify_target(site_base, push_endpoints, auth)
     return 0
 
 
@@ -391,14 +605,16 @@ def _cmd_scan(client: LiveAPISec, args: argparse.Namespace) -> int:
         if blocked:
             if not args.json:
                 print(
-                    f"\n❌ {len(blocked)} finding(s) at or above {gate_sev} — gate failed:",
+                    _red(
+                        f"\n{_BAD} {len(blocked)} finding(s) at or above {gate_sev} — gate failed:"
+                    ),
                     file=sys.stderr,
                 )
                 for f in blocked:
                     print("  " + _fmt_finding(f), file=sys.stderr)
             return 1
         if not args.json:
-            print(f"✅ no findings at or above {gate_sev}")
+            print(_green(f"{_OK} no findings at or above {gate_sev}"))
     return 0
 
 
@@ -479,7 +695,7 @@ def build_parser() -> argparse.ArgumentParser:
         )
 
     p_push = sub.add_parser("push", help="create/update a site (idempotent)")
-    p_push.add_argument("--name", required=True)
+    p_push.add_argument("--name", help="site name (interactive pick if omitted)")
     p_push.add_argument("--base-url")
     p_push.add_argument("--project")
     p_push.add_argument(
@@ -522,8 +738,8 @@ def build_parser() -> argparse.ArgumentParser:
         ],
         help="force framework (default: auto-detect)",
     )
-    p_code.add_argument("--name", required=True)
-    p_code.add_argument("--base-url", required=True)
+    p_code.add_argument("--name", help="site name (interactive pick if omitted)")
+    p_code.add_argument("--base-url", help="base URL (interactive pick if omitted)")
     p_code.add_argument("--project")
     p_code.add_argument("--site", help="existing site_id to update (PUT)")
     p_code.add_argument("--dry-run", action="store_true", help="scan + list endpoints, do not push")

@@ -134,6 +134,10 @@ class LiveAPISec:
     def get_site(self, site_id: str) -> dict[str, Any]:
         return self._request("GET", f"/developers/sites/{site_id}")
 
+    def list_sites(self) -> list[dict[str, Any]]:
+        """All sites for the API key's org (CLI groups them by project)."""
+        return self._request("GET", "/developers/sites")
+
     # -- scans ----------------------------------------------------------------
     def trigger_scan(
         self, site_id: str, branch: str | None = None, commit: str | None = None

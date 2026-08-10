@@ -423,7 +423,7 @@ def test_push_code_dry_run_lists_endpoints(tmp_path, capsys) -> None:
     )
     out = capsys.readouterr().out
     assert code == 0
-    assert "framework: fastapi" in out
+    assert "fastapi" in out and "1 files scanned" in out
     assert "GET" in out and "/x" in out
     assert "dry-run" in out
 
@@ -503,10 +503,18 @@ def test_push_code_pushes_site(tmp_path, capsys) -> None:
     assert "export SITE_ID=65f000000000000000000001" in out
 
 
-def test_push_code_requires_name_and_base_url(tmp_path) -> None:
-    with pytest.raises(SystemExit) as exc:
-        main(["push-code", "--dir", str(tmp_path)])
-    assert exc.value.code == 2
+def test_push_code_requires_name_and_base_url(tmp_path, capsys) -> None:
+    # nie-interaktywnie brak --name → exit 2 (nie argparse SystemExit, bo --name
+    # jest teraz opcjonalny na rzecz interaktywnego wyboru projektu/site'a)
+    _write(
+        tmp_path,
+        "main.py",
+        "from fastapi import FastAPI\napp=FastAPI()\n@app.get('/x')\ndef x(): ...\n",
+    )
+    code = main(["push-code", "--dir", str(tmp_path)])
+    err = capsys.readouterr().err
+    assert code == 2
+    assert "--name" in err
 
 
 def test_push_code_no_endpoints(tmp_path, capsys) -> None:
@@ -568,5 +576,5 @@ def test_clone_repo_and_scan(tmp_path, capsys) -> None:
     )
     out = capsys.readouterr().out
     assert code == 0
-    assert "framework: fastapi" in out
+    assert "fastapi" in out
     assert "/repo" in out

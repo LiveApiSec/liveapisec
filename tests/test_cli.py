@@ -12,6 +12,7 @@ from liveapisec.cli import (
     _cmd_findings,
     _cmd_push,
     _cmd_scan,
+    _print_endpoints,
     _validate_auth,
     _verify_target,
     main,
@@ -221,12 +222,176 @@ def test_cli_push_requires_endpoint(capsys) -> None:
     class Args:
         name = "x"
         base_url = "https://x.test"
+        project = None
         endpoint: list = []  # noqa: RUF012 (test stub)
         openapi_url = None
         site = None
+        verify = False
+        json = False
 
     assert _cmd_push(_StubClient(), Args()) == 2
     assert "error:" in capsys.readouterr().err
+
+
+# --- performance: 1000+ endpoints --------------------------------------------
+def test_cli_push_many_endpoints_sent_and_summarized(capsys) -> None:
+    """All 1500 endpoints go in ONE request; output summarizes + shows the cap note."""
+    captured: dict = {}
+
+    class Client:
+        def create_site(self, **kw):
+            captured["endpoints"] = kw["endpoints"]
+            return {
+                "site_id": "65fbig",
+                "name": kw["name"],
+                "endpoints_count": len(kw["endpoints"]),
+                "auth": "none",
+            }
+
+    class Args:
+        name = "my-api"
+        base_url = "https://api.example.com"
+        project = None
+        endpoint: list = [  # noqa: RUF012 (test stub)
+            {"method": "GET", "path": f"/users/{i}"} for i in range(1500)
+        ]
+        openapi_url = None
+        site = None
+        auth_type = "none"
+        auth_token = None
+        auth_cookie = None
+        auth_header = "X-API-Key"
+        auth_token_url = None
+        auth_client_id = None
+        auth_client_secret = None
+        verify = False
+        json = False
+
+    assert _cmd_push(Client(), Args()) == 0
+    # wszystko wysłane w jednym requeście
+    assert len(captured["endpoints"]) == 1500
+    # output podsumowuje (nie 1500 linii) + notka o limicie skanera
+    captured_out = capsys.readouterr()
+    assert "1500 endpoints" in captured_out.out
+    assert "SCANNER_MAX_TARGETS" in captured_out.err
+
+
+def test_print_endpoints_summarizes_large_list(capsys) -> None:
+    eps = [{"method": "GET", "path": f"/x/{i}"} for i in range(100)]
+    _print_endpoints(eps, limit=10)
+    out = capsys.readouterr().out
+    assert "/x/0" in out
+    assert "90 more" in out  # 100 - 10
+
+
+# --- interactive pickers (project / site) ------------------------------------
+def test_pick_project_existing(monkeypatch, capsys) -> None:
+    from liveapisec.cli import _pick_project
+
+    monkeypatch.setattr("builtins.input", lambda _p: "1")
+    sites = [
+        {"site_id": "a", "name": "api-a", "project": "svc"},
+        {"site_id": "b", "name": "api-b", "project": "svc"},
+        {"site_id": "c", "name": "api-c", "project": "mobile"},
+    ]
+    assert _pick_project(sites) == "mobile"  # posortowane: mobile, svc → 1 = mobile
+    out = capsys.readouterr().out
+    assert "Pick a project" in out
+    assert "create new project" in out
+
+
+def test_pick_project_new(monkeypatch, capsys) -> None:
+    from liveapisec.cli import _pick_project
+
+    monkeypatch.setattr("builtins.input", lambda _p: "brand-new")
+    assert _pick_project([]) == "brand-new"  # brak projektów → typuje nazwę
+
+
+def test_pick_site_existing(monkeypatch, capsys) -> None:
+    from liveapisec.cli import _pick_site
+
+    monkeypatch.setattr("builtins.input", lambda _p: "2")
+    sites = [
+        {"site_id": "a", "name": "api-a", "project": "svc", "base_url": "https://a"},
+        {"site_id": "b", "name": "api-b", "project": "svc", "base_url": "https://b"},
+    ]
+    picked = _pick_site(sites, "svc")
+    assert picked and picked["site_id"] == "b"
+
+
+def test_pick_site_new(monkeypatch, capsys) -> None:
+    from liveapisec.cli import _pick_site
+
+    monkeypatch.setattr("builtins.input", lambda _p: "9")  # spoza listy → nowy
+    sites = [{"site_id": "a", "name": "api-a", "project": "svc", "base_url": "https://a"}]
+    assert _pick_site(sites, "svc") is None
+
+
+def test_list_sites_sdk() -> None:
+    captured: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["url"] = str(request.url)
+        return httpx.Response(200, json=[{"site_id": "a", "project": "svc"}])
+
+    sites = _client(handler).list_sites()
+    assert captured["url"].endswith("/developers/sites")
+    assert sites == [{"site_id": "a", "project": "svc"}]
+
+
+def test_push_interactive_picks_existing_site(monkeypatch, capsys) -> None:
+    import sys as _sys
+
+    from liveapisec.cli import _cmd_push
+
+    class FakeTTY:
+        def isatty(self):
+            return True
+
+    monkeypatch.setattr(_sys, "stdin", FakeTTY())
+    monkeypatch.setattr("builtins.input", lambda _p: "1")  # project=1, site=1
+
+    sites = [
+        {"site_id": "siteA", "name": "api-a", "project": "svc", "base_url": "https://a.test"},
+    ]
+    calls: dict = {}
+
+    class Client:
+        def list_sites(self):
+            return sites
+
+        def create_site(self, **kw):
+            calls.update(kw)
+            return {
+                "site_id": kw.get("site_id") or "new",
+                "name": "x",
+                "endpoints_count": 1,
+                "auth": "none",
+                "updated": bool(kw.get("site_id")),
+            }
+
+    class Args:
+        name = None
+        base_url = None
+        project = None
+        endpoint: list = [{"method": "GET", "path": "/users"}]  # noqa: RUF012
+        openapi_url = None
+        site = None
+        auth_type = "none"
+        auth_token = None
+        auth_cookie = None
+        auth_header = "X-API-Key"
+        auth_token_url = None
+        auth_client_id = None
+        auth_client_secret = None
+        verify = False
+        json = False
+
+    assert _cmd_push(Client(), Args()) == 0
+    # wybrał istniejący site → PUT (site_id), name/base_url z istniejącego
+    assert calls["site_id"] == "siteA"
+    assert calls["name"] == "api-a"
+    assert calls["base_url"] == "https://a.test"
 
 
 # --- CLI: scan gate ----------------------------------------------------------
@@ -289,7 +454,7 @@ def test_cli_findings(capsys) -> None:
             return [{"severity": "medium", "title": "Rate limit", "target": "GET /healthz"}]
 
     assert _cmd_findings(Client(), Args()) == 0
-    assert "[medium] Rate limit" in capsys.readouterr().out
+    assert "[MEDIUM] Rate limit" in capsys.readouterr().out
 
 
 # --- OAuth2 auth + --verify --------------------------------------------------

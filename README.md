@@ -90,6 +90,32 @@ liveapisec config --clear  # remove the saved config file
 
 ## Commands
 
+### Interactive mode (project + site picker)
+
+When you run `push` / `push-code` in a terminal and **omit `--project`** (or
+`--site`), the CLI shows the projects available for your API key and lets you
+pick one — or create a new one. After picking a project you can pick an existing
+site/URL inside it, or add a new URL:
+
+```
+$ liveapisec push --endpoint "GET /users"
+No --project given. Pick a project (or create a new one):
+  1) svc      (3 site(s))
+  2) mobile   (1 site(s))
+  3) create new project
+Enter number or project name: 1
+Now pick a site/URL in 'svc' (or add a new one):
+  1) api-a  https://a.example.com
+  2) api-b  https://b.example.com
+  3) add new URL/site
+Enter number: 2
+→ updating existing site api-b
+✓ site 65f...: api-b — 2 endpoints, auth=none
+  export SITE_ID=65f...
+```
+
+In CI (no TTY) the flags are required as before — nothing changes in pipelines.
+
 ### 1. `push` — push your API (idempotent, safe in CI)
 
 ```bash
