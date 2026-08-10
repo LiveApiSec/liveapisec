@@ -106,6 +106,37 @@ liveapisec push \
 - Optional token: `--auth-type jwt --auth-token <TOKEN>` (or `bearer`,
   `cookie --auth-cookie "session=..."`, `api_key --auth-header X-API-Key`).
 
+#### OAuth2 Client Credentials (M2M) — recommended for CI/CD
+
+Short-lived JWTs expire before the scan runs. Instead, register a
+**Machine-to-Machine** application in your identity provider (Auth0, Okta,
+Azure AD, Keycloak…) once and push the long-lived client credentials — our
+scanner fetches a **fresh token at every scan**:
+
+```bash
+liveapisec push --name my-api --base-url https://api.example.com \
+  --auth-type oauth2 \
+  --auth-token-url https://<your-idp>/oauth/token \
+  --auth-client-id "$CLIENT_ID" --auth-client-secret "$CLIENT_SECRET" \
+  --endpoint "GET /users"
+```
+
+#### Verify the token before you commit to it
+
+`--verify` probes the first endpoint with the pushed auth and reports whether
+the token actually works (exit 2 on a bad/expired token):
+
+```bash
+liveapisec push --name my-api --base-url https://api.example.com \
+  --auth-type bearer --auth-token "$TOKEN" \
+  --endpoint "GET /users" --verify
+# → verify: GET https://api.example.com/users → 200 ✓
+#   or: verify: GET https://api.example.com/users → 401 ✗ auth failed — ...
+```
+
+> Network errors from `--verify` are informational — your machine may not reach
+> the API while our scanner can; what matters is the auth result (2xx vs 401/403).
+
 Output:
 
 ```

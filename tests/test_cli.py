@@ -7,7 +7,15 @@ import json
 import httpx
 import pytest
 
-from liveapisec.cli import _cmd_findings, _cmd_push, _cmd_scan, main
+from liveapisec.cli import (
+    _build_auth,
+    _cmd_findings,
+    _cmd_push,
+    _cmd_scan,
+    _validate_auth,
+    _verify_target,
+    main,
+)
 from liveapisec.client import LiveAPISec, LiveAPISecError, severity_rank
 
 
@@ -197,6 +205,10 @@ def test_cli_push_builds_payload(capsys) -> None:
         auth_token = None
         auth_cookie = None
         auth_header = "X-API-Key"
+        auth_token_url = None
+        auth_client_id = None
+        auth_client_secret = None
+        verify = False
         json = False
 
     assert _cmd_push(stub, Args()) == 0
@@ -278,6 +290,102 @@ def test_cli_findings(capsys) -> None:
 
     assert _cmd_findings(Client(), Args()) == 0
     assert "[medium] Rate limit" in capsys.readouterr().out
+
+
+# --- OAuth2 auth + --verify --------------------------------------------------
+def test_build_auth_oauth2() -> None:
+    class Args:
+        auth_type = "oauth2"
+        auth_token = None
+        auth_cookie = None
+        auth_header = "X-API-Key"
+        auth_token_url = "https://idp.example.com/oauth/token"
+        auth_client_id = "client-123"
+        auth_client_secret = "s3cret"
+
+    auth = _build_auth(Args())
+    assert auth == {
+        "type": "oauth2",
+        "token_url": "https://idp.example.com/oauth/token",
+        "client_id": "client-123",
+        "client_secret": "s3cret",
+    }
+
+
+def test_validate_auth_oauth2_requires_fields() -> None:
+    class Args:
+        auth_type = "oauth2"
+        auth_token = None
+        auth_cookie = None
+        auth_header = "X-API-Key"
+        auth_token_url = "https://idp.example.com/oauth/token"
+        auth_client_id = None
+        auth_client_secret = None
+
+    assert _validate_auth(Args(), {"type": "oauth2"}) is not None
+
+
+def test_validate_auth_bearer_requires_token() -> None:
+    class Args:
+        auth_type = "bearer"
+        auth_token = None
+        auth_cookie = None
+        auth_header = "X-API-Key"
+        auth_token_url = None
+        auth_client_id = None
+        auth_client_secret = None
+
+    assert _validate_auth(Args(), {"type": "bearer"}) is not None
+
+
+def test_verify_target_ok(monkeypatch, capsys) -> None:
+    def fake_request(method, url, headers=None, timeout=None, follow_redirects=None):
+        assert headers["Authorization"] == "Bearer tok"
+        return httpx.Response(200)
+
+    monkeypatch.setattr("httpx.request", fake_request)
+    auth = {"type": "bearer", "token": "tok"}
+    assert (
+        _verify_target("https://api.example.com", [{"method": "GET", "path": "/users"}], auth) == 0
+    )
+    assert "✓" in capsys.readouterr().out
+
+
+def test_verify_target_auth_failed(monkeypatch, capsys) -> None:
+    def fake_request(method, url, headers=None, timeout=None, follow_redirects=None):
+        return httpx.Response(401)
+
+    monkeypatch.setattr("httpx.request", fake_request)
+    auth = {"type": "bearer", "token": "dead"}
+    code = _verify_target("https://api.example.com", [{"method": "GET", "path": "/users"}], auth)
+    assert code == 2
+    assert "auth failed" in capsys.readouterr().err
+
+
+def test_verify_target_oauth2_fetches_token(monkeypatch, capsys) -> None:
+    import httpx as _httpx
+
+    def fake_request(
+        method, url, headers=None, timeout=None, follow_redirects=None, data=None, **kw
+    ):
+        req = _httpx.Request(method, url)
+        # token fetch
+        if url == "https://idp.example.com/oauth/token":
+            assert data["grant_type"] == "client_credentials"
+            return _httpx.Response(200, json={"access_token": "fresh"}, request=req)
+        assert headers["Authorization"] == "Bearer fresh"
+        return _httpx.Response(200, request=req)
+
+    monkeypatch.setattr("httpx.request", fake_request)
+    auth = {
+        "type": "oauth2",
+        "token_url": "https://idp.example.com/oauth/token",
+        "client_id": "c",
+        "client_secret": "s",
+    }
+    assert (
+        _verify_target("https://api.example.com", [{"method": "GET", "path": "/users"}], auth) == 0
+    )
 
 
 def test_cli_main_requires_api_key(capsys, monkeypatch) -> None:

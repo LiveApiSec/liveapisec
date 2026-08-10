@@ -485,11 +485,15 @@ def test_push_code_pushes_site(tmp_path, capsys) -> None:
         "project": None,
         "site": None,
         "dry_run": False,
+        "verify": False,
         "json": False,
         "auth_type": "none",
         "auth_token": None,
         "auth_cookie": None,
         "auth_header": "X-API-Key",
+        "auth_token_url": None,
+        "auth_client_id": None,
+        "auth_client_secret": None,
     }
     code = _cmd_push_code(_client(handler), type("Args", (), args)())
     out = capsys.readouterr().out

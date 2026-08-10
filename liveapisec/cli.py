@@ -50,11 +50,18 @@ def _parse_endpoint(value: str) -> dict[str, str]:
 
 def _auth_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
-        "--auth-type", choices=["none", "jwt", "bearer", "cookie", "api_key"], default="none"
+        "--auth-type",
+        choices=["none", "jwt", "bearer", "cookie", "api_key", "oauth2"],
+        default="none",
     )
     parser.add_argument("--auth-token", help="token for jwt/bearer/api_key")
     parser.add_argument("--auth-cookie", help="full Cookie header for type=cookie")
     parser.add_argument("--auth-header", default="X-API-Key", help="header name for api_key")
+    parser.add_argument(
+        "--auth-token-url", help="token endpoint for type=oauth2 (client_credentials)"
+    )
+    parser.add_argument("--auth-client-id", help="OAuth2 client_id for type=oauth2")
+    parser.add_argument("--auth-client-secret", help="OAuth2 client_secret for type=oauth2")
 
 
 def _build_auth(args: argparse.Namespace) -> dict[str, Any] | None:
@@ -67,7 +74,104 @@ def _build_auth(args: argparse.Namespace) -> dict[str, Any] | None:
         auth["cookie"] = args.auth_cookie
     if args.auth_type == "api_key":
         auth["header"] = args.auth_header
+    if args.auth_type == "oauth2":
+        auth["token_url"] = args.auth_token_url
+        auth["client_id"] = args.auth_client_id
+        auth["client_secret"] = args.auth_client_secret
     return auth
+
+
+def _validate_auth(args: argparse.Namespace, auth: dict[str, Any] | None) -> str | None:
+    """Return an error message for an invalid auth config, else None."""
+    if not auth:
+        return None
+    t = args.auth_type
+    if t in ("jwt", "bearer", "api_key") and not args.auth_token:
+        return f"--auth-token required for auth-type={t}"
+    if t == "cookie" and not args.auth_cookie:
+        return "--auth-cookie required for auth-type=cookie"
+    if t == "oauth2" and not (
+        args.auth_token_url and args.auth_client_id and args.auth_client_secret
+    ):
+        return "--auth-token-url, --auth-client-id and --auth-client-secret required for auth-type=oauth2"
+    return None
+
+
+def _fetch_oauth2_token_cli(auth: dict[str, Any]) -> str:
+    """Fetch a fresh access_token for OAuth2 client_credentials (CLI-side verify)."""
+    import httpx
+
+    resp = httpx.request(
+        "POST",
+        auth["token_url"],
+        data={
+            "grant_type": "client_credentials",
+            "client_id": auth.get("client_id", ""),
+            "client_secret": auth.get("client_secret", ""),
+        },
+        timeout=10.0,
+    )
+    resp.raise_for_status()
+    token = resp.json().get("access_token")
+    if not token:
+        raise RuntimeError("no access_token in response")
+    return token
+
+
+def _verify_target(
+    base_url: str, endpoints: list[dict[str, str]], auth: dict[str, Any] | None
+) -> int:
+    """Pre-flight check of the first endpoint with the pushed auth (--verify).
+
+    Returns exit code: 0 = ok, 2 = auth-level failure (bad token / fetch error).
+    Network errors are informational (our scanner may reach APIs the dev box can't).
+    """
+    import httpx
+
+    if not endpoints:
+        print("  verify: no endpoints to probe", file=sys.stderr)
+        return 0
+    first = endpoints[0]
+    url = base_url.rstrip("/") + first["path"]
+    headers: dict[str, str] = {}
+    at = (auth or {}).get("type")
+    try:
+        if at == "bearer":
+            headers["Authorization"] = f"Bearer {auth.get('token', '')}"
+        elif at == "api_key":
+            headers[auth.get("header") or "X-API-Key"] = auth.get("token", "")
+        elif at == "cookie":
+            headers["Cookie"] = auth.get("cookie", "")
+        elif at == "oauth2":
+            headers["Authorization"] = f"Bearer {_fetch_oauth2_token_cli(auth)}"
+    except Exception as exc:  # noqa: BLE001
+        print(f"  verify: could not build auth ({at}): {exc}", file=sys.stderr)
+        return 2
+    try:
+        resp = httpx.request(
+            first["method"], url, headers=headers, timeout=10.0, follow_redirects=True
+        )
+    except httpx.HTTPError as exc:
+        print(
+            f"  verify: cannot reach {url} from here ({exc}) — that's OK if the API is only reachable from our scanner, but check the token/scopes",
+            file=sys.stderr,
+        )
+        return 0
+    status = resp.status_code
+    if 200 <= status < 400:
+        print(f"  verify: {first['method']} {url} → {status} ✓")
+        return 0
+    if status in (401, 403):
+        print(
+            f"  verify: {first['method']} {url} → {status} ✗ auth failed — token expired, wrong scope or wrong header",
+            file=sys.stderr,
+        )
+        return 2
+    print(
+        f"  verify: {first['method']} {url} → {status} (reachable, unexpected status)",
+        file=sys.stderr,
+    )
+    return 0
 
 
 def _fmt_scan(scan: dict[str, Any]) -> str:
@@ -115,11 +219,9 @@ def _cmd_push(client: LiveAPISec, args: argparse.Namespace) -> int:
         print("error: provide at least one --endpoint or --openapi-url", file=sys.stderr)
         return 2
     auth = _build_auth(args)
-    if auth and args.auth_type in ("jwt", "bearer", "api_key") and not args.auth_token:
-        print(f"error: --auth-token required for auth-type={args.auth_type}", file=sys.stderr)
-        return 2
-    if auth and args.auth_type == "cookie" and not args.auth_cookie:
-        print("error: --auth-cookie required for auth-type=cookie", file=sys.stderr)
+    err = _validate_auth(args, auth)
+    if err:
+        print(f"error: {err}", file=sys.stderr)
         return 2
 
     site = client.create_site(
@@ -139,6 +241,8 @@ def _cmd_push(client: LiveAPISec, args: argparse.Namespace) -> int:
             f"site {site['site_id']}{updated}: {site['name']} — {site['endpoints_count']} endpoints, auth={site['auth']}"
         )
         print(f"export SITE_ID={site['site_id']}")
+    if args.verify and not args.json:
+        return _verify_target(args.base_url, args.endpoint or [], auth)
     return 0
 
 
@@ -230,6 +334,10 @@ def _cmd_push_code(client: LiveAPISec, args: argparse.Namespace) -> int:
             print(f"  {e['method']:7} {e['path']}")
 
     auth = _build_auth(args)
+    err = _validate_auth(args, auth)
+    if err:
+        print(f"error: {err}", file=sys.stderr)
+        return 2
     push_endpoints = [{"method": e["method"], "path": e["path"]} for e in endpoints]
     site = client.create_site(
         name=args.name,
@@ -247,6 +355,8 @@ def _cmd_push_code(client: LiveAPISec, args: argparse.Namespace) -> int:
             f"site {site['site_id']}{updated}: {site['name']} — {site['endpoints_count']} endpoints, auth={site['auth']}"
         )
         print(f"export SITE_ID={site['site_id']}")
+    if args.verify and not args.json:
+        return _verify_target(args.base_url, push_endpoints, auth)
     return 0
 
 
@@ -377,6 +487,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_push.add_argument("--openapi-url", help="URL to OpenAPI spec instead of --endpoint")
     p_push.add_argument("--site", help="existing site_id to update (PUT)")
+    p_push.add_argument(
+        "--verify",
+        action="store_true",
+        help="probe the first endpoint with the pushed auth (catch bad tokens early)",
+    )
     _auth_args(p_push)
     _json_flag(p_push)
     p_push.set_defaults(func=_cmd_push)
@@ -412,6 +527,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_code.add_argument("--project")
     p_code.add_argument("--site", help="existing site_id to update (PUT)")
     p_code.add_argument("--dry-run", action="store_true", help="scan + list endpoints, do not push")
+    p_code.add_argument(
+        "--verify",
+        action="store_true",
+        help="probe the first endpoint with the pushed auth (catch bad tokens early)",
+    )
     _auth_args(p_code)
     _json_flag(p_code)
     p_code.set_defaults(func=_cmd_push_code)
