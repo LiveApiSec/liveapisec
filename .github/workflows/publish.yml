@@ -11,6 +11,8 @@ permissions:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    env:
+      PYPI_API_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -23,15 +25,16 @@ jobs:
       # Publikacja na PyPI:
       #  1) token API z PyPI jako sekret PYPI_API_TOKEN (username: __token__),
       #  2) fallback: Trusted Publishing (OIDC, bez sekretów).
+      # Uwaga: secrets nie jest dostępny w warunkach `if` — stąd env.
       - name: Publish to PyPI (API token)
-        if: secrets.PYPI_API_TOKEN != ''
+        if: env.PYPI_API_TOKEN != ''
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: dist
           username: __token__
           password: ${{ secrets.PYPI_API_TOKEN }}
       - name: Publish to PyPI (Trusted Publishing)
-        if: secrets.PYPI_API_TOKEN == ''
+        if: env.PYPI_API_TOKEN == ''
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: dist
