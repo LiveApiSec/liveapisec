@@ -11,6 +11,44 @@ use it in any project, script and CI/CD pipeline — no dashboard, no curl.
 
 ---
 
+## Which APIs does it work with? (not Python-only)
+
+The `liveapisec` CLI is **written in Python** — but that is only the tool you
+run. You use it to push, test and monitor APIs built in **any** language and
+framework: Python, Node.js, Go, Rust, Java/Kotlin, PHP, Ruby, .NET/C#… It does
+not matter how your backend is implemented, as long as it exposes HTTP(S)
+endpoints.
+
+**3 ways to get your endpoints in:**
+
+1. **`push`** — list endpoints yourself (works for **any** HTTP API).
+2. **`push --openapi-url …`** — pull an OpenAPI spec (FastAPI/DRF, Springdoc,
+   NestJS Swagger, express swagger-ui, ASP.NET Swashbuckle…).
+3. **`push-code`** — scan the source code; it auto-detects these
+   **11 frameworks**:
+
+| Language | Frameworks recognized by `push-code` |
+|----------|---------------------------------------|
+| Python   | FastAPI · Flask · Django              |
+| JS/TS    | Next.js (App + Pages Router) · NestJS · Express |
+| PHP      | Laravel · PHP/Slim · Lumen            |
+| Java     | Spring MVC / Spring Boot (`@GetMapping`) |
+| Go       | Gin · Echo · Fiber · Chi · gorilla/mux · `net/http` |
+| Rust     | axum · actix-web · rocket · warp      |
+
+**What kind of applications work?** REST/JSON APIs — microservices, monoliths,
+BFFs, API gateways, third-party APIs… public or protected (jwt / bearer /
+cookie / api_key / OAuth2). `push-code` reads the HTTP routes; the app behind
+them can be anything.
+
+**Integration & SDK:** the package also ships a **Python SDK**
+(`from liveapisec import LiveAPISec`), and the same Developer API is a plain
+**REST** API you can call from **any language** (curl, Node `fetch`, Go…) — the
+CLI just wraps those endpoints. See the [SDK section](#sdk) below and the
+in-browser docs at **https://liveapisec.com/docs**.
+
+---
+
 ## Installation
 
 ### One command (Linux / macOS) — recommended
@@ -330,6 +368,8 @@ cd cli && python -m pytest tests/ -q
 
 ## SDK (API)
 
+### Python
+
 Besides the CLI, the package also exports a client for scripts:
 
 ```python
@@ -341,6 +381,27 @@ site = api.create_site("my-api", "https://api.example.com",
 scan = api.trigger_scan(site["site_id"], branch="main", commit="abc")
 done = api.wait_for_scan(site["site_id"], scan["scan_id"])
 blocked = LiveAPISec.findings_above(done["findings"], "high")
+```
+
+### From any other language — plain REST
+
+Not on Python? The endpoints behind the CLI are a standard REST API. Call them
+with **curl**, Node `fetch`, Go, Java, Ruby… anything that speaks HTTP — you get
+the same result as the CLI (endpoints pushed, scans run, findings readable by
+your agent or CI):
+
+```bash
+# push a site + endpoints from any language
+curl -X POST $LIVEAPISEC_API_URL/developers/sites \
+  -H "Authorization: Bearer $LIVEAPISEC_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"name":"my-api","base_url":"https://api.example.com",
+       "endpoints":[{"method":"GET","path":"/users"}]}'
+
+# trigger a scan
+curl -X POST $LIVEAPISEC_API_URL/developers/sites/$SITE_ID/scans \
+  -H "Authorization: Bearer $LIVEAPISEC_API_KEY" \
+  -d '{"branch":"main","commit":"abc123"}'
 ```
 
 ---
@@ -358,6 +419,14 @@ Environment:
 - `LIVEAPISEC_API_KEY` — dev API key (las_dev_...), usually already set.
 - `LIVEAPISEC_API_URL` — API base URL (default: https://liveapisec.com).
 - `SITE_ID` — the site id returned by `liveapisec push` / `liveapisec sites`.
+
+Language note: the CLI is written in Python, but it tests APIs built in ANY
+language/framework — Python, Node.js, Go, Rust, Java, PHP, Ruby, .NET, etc.
+Use `liveapisec push-code` to auto-extract endpoints from the source
+(FastAPI, Flask, Django, Next.js, NestJS, Express, Laravel, PHP/Slim, Spring,
+Go, Rust), or `push --openapi-url` for any API that exposes an OpenAPI spec.
+If your stack is not Python, you can call the same Developer REST API directly
+from your language (see the SDK section).
 
 Workflow:
 1. Push the API under test (idempotent — safe to repeat):
