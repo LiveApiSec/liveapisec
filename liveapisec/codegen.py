@@ -49,6 +49,8 @@ _PY_SUFFIXES = (".py",)
 _TS_SUFFIXES = (".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs")
 _PHP_SUFFIXES = (".php",)
 _JAVA_SUFFIXES = (".java",)
+_GO_SUFFIXES = (".go",)
+_RS_SUFFIXES = (".rs",)
 
 _MAX_FILES = 5000
 
@@ -187,6 +189,30 @@ def detect_framework(root: str, files: list[str]) -> str | None:
             text,
         ):
             return "spring"
+
+    go = [f for f in files if f.endswith(_GO_SUFFIXES)]
+    for f in go:
+        text = _read(f)
+        if re.search(
+            r"gin-gonic|labstack/echo|gofiber|go-chi|gorilla/mux|http\.HandleFunc|http\.Handle\(",
+            text,
+        ):
+            return "go"
+
+    rs = [f for f in files if f.endswith(_RS_SUFFIXES)]
+    for f in files:
+        if os.path.basename(f) == "Cargo.toml":
+            text = _read(f)
+            if re.search(r"\b(axum|actix-web|rocket|warp)\b", text):
+                return "rust"
+    for f in rs:
+        text = _read(f)
+        if re.search(
+            r"use\s+axum|use\s+actix_web|use\s+rocket|use\s+warp|#\[(get|post|put|patch|delete)\(",
+            text,
+            re.IGNORECASE,
+        ):
+            return "rust"
 
     if php:
         return "php"
@@ -507,6 +533,61 @@ def _parse_spring(text: str, rel_path: str) -> list[dict[str, str]]:
     return out
 
 
+# ---------------------------------------------------------------- Go
+
+
+# Gin/Echo/Fiber/Chi: r.GET("/x"), e.POST("/x/:id"), app.Put(...)
+_GO_METHOD_RE = re.compile(
+    r"""\.(?P<method>GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS|Any)\s*\(\s*(['"])(?P<path>/.*?)\2""",
+    re.IGNORECASE,
+)
+# stdlib net/http
+_GO_HANDLE_RE = re.compile(
+    r"""http\.(?:HandleFunc|Handle)\s*\(\s*(['"])(?P<path>/.*?)\1""",
+)
+
+
+def _parse_go(text: str, rel_path: str) -> list[dict[str, str]]:
+    out: list[dict[str, str]] = []
+    for match in _GO_METHOD_RE.finditer(text):
+        method = match.group("method").upper()
+        if method == "ANY":
+            method = "GET"
+        out.append({"method": method, "path": _js_path(match.group("path")), "source": rel_path})
+    for match in _GO_HANDLE_RE.finditer(text):
+        # net/http handlers don't carry the HTTP method — assume GET.
+        out.append({"method": "GET", "path": _js_path(match.group("path")), "source": rel_path})
+    return out
+
+
+# ---------------------------------------------------------------- Rust
+
+
+# actix-web / rocket attribute macros: #[get("/x")], #[post("/x/{id}")], #[rocket::get("/x")]
+_RUST_ATTR_RE = re.compile(
+    r"""#\[(?:\w+::)?(?P<method>get|post|put|patch|delete|head|options)\s*\(\s*(['"])(?P<path>.*?)\2""",
+    re.IGNORECASE,
+)
+# axum: .route("/x", get(handler)) / post(...)
+_RUST_AXUM_RE = re.compile(
+    r"""\.route\s*\(\s*(['"])(?P<path>.*?)\1\s*,\s*(?P<method>get|post|put|patch|delete|head|options|any)\s*\(""",
+    re.IGNORECASE,
+)
+
+
+def _parse_rust(text: str, rel_path: str) -> list[dict[str, str]]:
+    out: list[dict[str, str]] = []
+    for match in _RUST_ATTR_RE.finditer(text):
+        method = match.group("method").upper()
+        out.append({"method": method, "path": _js_path(match.group("path")), "source": rel_path})
+    for match in _RUST_AXUM_RE.finditer(text):
+        method = match.group("method").upper()
+        if method == "ANY":
+            method = "GET"
+        out.append({"method": method, "path": _js_path(match.group("path")), "source": rel_path})
+    return out
+
+
 # ---------------------------------------------------------------- main API
 
 
@@ -542,6 +623,14 @@ def scan_code(root: str, framework: str | None = None) -> ScanResult:
         for f in files:
             if f.endswith(_JAVA_SUFFIXES):
                 endpoints.extend(_parse_spring(_read(f), _rel(root, f)))
+    elif detected == "go":
+        for f in files:
+            if f.endswith(_GO_SUFFIXES):
+                endpoints.extend(_parse_go(_read(f), _rel(root, f)))
+    elif detected == "rust":
+        for f in files:
+            if f.endswith(_RS_SUFFIXES):
+                endpoints.extend(_parse_rust(_read(f), _rel(root, f)))
 
     return ScanResult(
         framework=detected,

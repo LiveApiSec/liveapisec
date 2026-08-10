@@ -125,8 +125,9 @@ liveapisec push-code --dir . --name my-api --base-url https://api.example.com
 
 - Auto-detected frameworks: **FastAPI**, **Flask**, **Django**, **Next.js**
   (`app/api` + `pages/api`), **NestJS** (`@Controller`/`@Get`), **Express**
-  (`app.get`), **Laravel**, generic **PHP** (`$app->get`, Slim, Lumen) and
-  **Spring** (`@GetMapping`, Java).
+  (`app.get`), **Laravel**, generic **PHP** (`$app->get`, Slim, Lumen),
+  **Spring** (`@GetMapping`, Java), **Go** (Gin, Echo, Fiber, Chi, gorilla/mux,
+  `net/http`) and **Rust** (axum, actix-web, rocket, warp).
 - Scan a git repository straight from a URL (https / ssh / local path) —
   it is shallow-cloned to a temp dir and cleaned up afterwards:
 
@@ -155,9 +156,9 @@ site 65f...abc: my-api — 58 endpoints, auth=none
 export SITE_ID=65f...abc
 ```
 
-> **Note on methods**: FastAPI/Flask/Express/NestJS/Spring/Laravel carry the
-> HTTP method in the code. Django `urlpatterns` do not — those routes are
-> assumed to be `GET`.
+> **Note on methods**: FastAPI/Flask/Express/NestJS/Spring/Laravel/Go/Rust carry
+> the HTTP method in the code. Django `urlpatterns` and Go `net/http` handlers
+> do not — those routes are assumed to be `GET`.
 
 ### 3. `scan` — run a security test
 

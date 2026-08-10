@@ -198,7 +198,7 @@ def _cmd_push_code(client: LiveAPISec, args: argparse.Namespace) -> int:
         fw = (
             f" (framework: {result.framework})"
             if result.framework
-            else " — could not detect a supported framework (fastapi/flask/django/nextjs/nestjs/express/laravel/php/spring)"
+            else " — could not detect a supported framework (fastapi/flask/django/nextjs/nestjs/express/laravel/php/spring/go/rust)"
         )
         print(f"error: no endpoints found in {root}{fw}", file=sys.stderr)
         return 2
@@ -383,7 +383,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_code = sub.add_parser(
         "push-code",
-        help="scan source code for endpoints and push them (fastapi/flask/django/nextjs/nestjs/express/laravel/php/spring)",
+        help="scan source code for endpoints and push them (fastapi/flask/django/nextjs/nestjs/express/laravel/php/spring/go/rust)",
     )
     p_code.add_argument("--dir", default=".", help="project directory or file to scan (default: .)")
     p_code.add_argument(
@@ -402,6 +402,8 @@ def build_parser() -> argparse.ArgumentParser:
             "laravel",
             "php",
             "spring",
+            "go",
+            "rust",
         ],
         help="force framework (default: auto-detect)",
     )

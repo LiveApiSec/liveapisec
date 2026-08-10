@@ -271,6 +271,113 @@ public class UserController {
     assert ("GET", "/health") in eps
 
 
+# ---------------------------------------------------------------- Go
+
+
+def test_scan_go_gin(tmp_path) -> None:
+    _write(
+        tmp_path,
+        "main.go",
+        """package main
+
+import (
+    "github.com/gin-gonic/gin"
+    "net/http"
+)
+
+func main() {
+    r := gin.Default()
+    r.GET("/users", listUsers)
+    r.POST("/users/:id", updateUser)
+    r.PUT("/health", health)
+    http.HandleFunc("/legacy", legacy)
+}
+""",
+    )
+    result = scan_code(str(tmp_path))
+    assert result.framework == "go"
+    eps = {(e["method"], e["path"]) for e in result.endpoints}
+    assert ("GET", "/users") in eps
+    assert ("POST", "/users/{id}") in eps
+    assert ("PUT", "/health") in eps
+    assert ("GET", "/legacy") in eps
+
+
+def test_scan_go_echo(tmp_path) -> None:
+    _write(
+        tmp_path,
+        "server.go",
+        """package main
+import "github.com/labstack/echo/v4"
+func main() {
+    e := echo.New()
+    e.GET("/api/v1/items", listItems)
+    e.DELETE("/api/v1/items/:id", deleteItem)
+}
+""",
+    )
+    result = scan_code(str(tmp_path))
+    assert result.framework == "go"
+    eps = {(e["method"], e["path"]) for e in result.endpoints}
+    assert ("GET", "/api/v1/items") in eps
+    assert ("DELETE", "/api/v1/items/{id}") in eps
+
+
+# ---------------------------------------------------------------- Rust
+
+
+def test_scan_rust_axum(tmp_path) -> None:
+    _write(
+        tmp_path,
+        "Cargo.toml",
+        '[dependencies]\naxum = "0.7"\n',
+    )
+    _write(
+        tmp_path,
+        "src/main.rs",
+        """use axum::routing::{get, post};
+use axum::Router;
+
+async fn main() {
+    let app = Router::new()
+        .route("/users", get(list_users))
+        .route("/users", post(create_user))
+        .route("/users/{id}", get(get_user));
+}
+""",
+    )
+    result = scan_code(str(tmp_path))
+    assert result.framework == "rust"
+    eps = {(e["method"], e["path"]) for e in result.endpoints}
+    assert ("GET", "/users") in eps
+    assert ("POST", "/users") in eps
+    assert ("GET", "/users/{id}") in eps
+
+
+def test_scan_rust_actix_rocket(tmp_path) -> None:
+    _write(
+        tmp_path,
+        "src/main.rs",
+        """use actix_web::{get, post, App};
+
+#[get("/users")]
+async fn list() {}
+
+#[post("/users/{id}")]
+async fn update() {}
+
+#[rocket::get("/health")]
+async fn health() {}
+""",
+    )
+    result = scan_code(str(tmp_path))
+    assert result.framework == "rust"
+    eps = {(e["method"], e["path"]) for e in result.endpoints}
+    assert ("GET", "/users") in eps
+    assert ("POST", "/users/{id}") in eps
+    assert ("GET", "/health") in eps
+
+
 # ---------------------------------------------------------------- detection
 
 
