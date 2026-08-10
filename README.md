@@ -12,16 +12,16 @@ używasz w dowolnym projekcie, skrypcie i pipeline CI/CD — bez dashboardu i be
 
 ## Instalacja
 
-Z GitHub (rekomendowane, zanim trafimy na PyPI):
-
-```bash
-pip install "liveapisec @ git+https://github.com/LiveApiSec/liveapisec.git"
-```
-
-Po publikacji na PyPI:
+Z PyPI (rekomendowane):
 
 ```bash
 pip install liveapisec
+```
+
+Z GitHub (jeśli wolisz build z repozytorium):
+
+```bash
+pip install "liveapisec @ git+https://github.com/LiveApiSec/liveapisec.git"
 ```
 
 Sprawdź:
