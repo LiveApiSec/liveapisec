@@ -289,16 +289,25 @@ the agent think live in the dashboard.
 # dev/staging only — NEVER production (it can break/destroy a system)
 liveapisec hacker --site SITE_ID --env development
 liveapisec hacker --site SITE_ID --env staging --wait
+
+# guided mode — give the agent a specific objective (TODO 3.6.2)
+liveapisec hacker --site SITE_ID --env development \
+  --goal "check /users for IDOR — your record vs another user's"
 ```
 
 - `--env` — environment name defined on the site (e.g. `development`, `staging`).
   **Production environments are rejected (403).**
+- `--goal` — optional guided attack objective (e.g. "check /users for IDOR",
+  "try to escalate to admin", "enumerate secrets"). Without it the agent explores
+  freely.
 - `--wait` — polls until the AI agent finishes.
 - **Domain verification**: public targets need a verified domain (the dashboard
   Domains flow). **Localhost / private IPs (e.g. `http://localhost:8000`, `10.x`)
   are exempt** — no domain verification needed for your own local server.
 - Your API URL and credentials are **never** sent to the AI — only relative paths
-  reach the model; requests are executed server-side in a sandbox.
+  reach the model; requests are executed server-side in a sandbox. If the site has
+  credentials, the agent runs **authenticated** (it only learns a flag, not the
+  token) and can test IDOR/BOLA and privilege escalation as a real user.
 
 ### 5. `status` — site status + recent scans
 
