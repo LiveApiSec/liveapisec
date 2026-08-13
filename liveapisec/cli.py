@@ -4,6 +4,7 @@ Commands:
   push      — create/update a site + endpoints + optional token (idempotent)
   push-code — scan source code (fastapi/flask/nextjs/laravel/php) and push endpoints
   scan      — run a scan; --wait waits for the result; --fail-on sets the CI gate
+  hacker    — run an autonomous AI hacker-mode test (dev/staging only, localhost exempt)
   status    — site status / recent scans
   findings  — list findings (--json)
   sites     — show a site (endpoints, last_scan)
@@ -628,6 +629,46 @@ def _cmd_scan(client: LiveAPISec, args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_hacker(client: LiveAPISec, args: argparse.Namespace) -> int:
+    """Run an autonomous AI hacker-mode test (TODO 3.6.1).
+
+    Destructive authorized test — dev/staging ONLY, never production. Public
+    targets need a verified domain; localhost / private IPs are exempt.
+    """
+    if not args.site:
+        print("error: --site (site_id) is required", file=sys.stderr)
+        return 2
+    if not args.env:
+        print(
+            "error: --env (environment name, e.g. development) is required", file=sys.stderr
+        )
+        return 2
+    scan = client.trigger_hacker_scan(args.site, args.env)
+    scan_id = scan["scan_id"]
+    if args.json:
+        print(LiveAPISec.dump(scan))
+    else:
+        print(
+            _WARN
+            + _yellow(
+                " hacker mode is a DESTRUCTIVE authorized AI test — "
+                "dev/staging only, never production (it can break/destroy a system)."
+            )
+        )
+        print(f"hacker scan queued: {scan_id} (env={args.env})")
+    if not args.wait:
+        return 0
+
+    if not args.json:
+        print("waiting for the AI agent to finish…", file=sys.stderr)
+    done = client.wait_for_scan(args.site, scan_id)
+    if args.json:
+        print(LiveAPISec.dump(done))
+    else:
+        print(_fmt_scan(done))
+    return 0 if done.get("status") == "completed" else 2
+
+
 def _cmd_status(client: LiveAPISec, args: argparse.Namespace) -> int:
     if not args.site:
         print("error: --site (site_id) is required", file=sys.stderr)
@@ -843,6 +884,20 @@ def build_parser() -> argparse.ArgumentParser:
     p_scan.add_argument("--timeout", type=float, default=600.0)
     _json_flag(p_scan)
     p_scan.set_defaults(func=_cmd_scan)
+
+    p_hacker = sub.add_parser(
+        "hacker",
+        help="run an autonomous AI hacker-mode test (dev/staging only; localhost exempt)",
+    )
+    p_hacker.add_argument("--site", required=True)
+    p_hacker.add_argument(
+        "--env", required=True, help="environment name, e.g. development or staging"
+    )
+    p_hacker.add_argument("--wait", action="store_true", help="poll until the agent finishes")
+    p_hacker.add_argument("--poll-interval", type=float, default=3.0)
+    p_hacker.add_argument("--timeout", type=float, default=600.0)
+    _json_flag(p_hacker)
+    p_hacker.set_defaults(func=_cmd_hacker)
 
     p_status = sub.add_parser("status", help="site status + recent scans")
     p_status.add_argument("--site", required=True)
