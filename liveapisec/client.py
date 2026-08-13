@@ -151,16 +151,22 @@ class LiveAPISec:
         return self._request("POST", f"/developers/sites/{site_id}/scans", json=payload)
 
     # -- hacker mode (TODO 3.6 / 3.6.1) --------------------------------------
-    def trigger_hacker_scan(self, site_id: str, environment: str) -> dict[str, Any]:
+    def trigger_hacker_scan(
+        self, site_id: str, environment: str, goal: str | None = None
+    ) -> dict[str, Any]:
         """Trigger an autonomous AI hacker-mode test (202) on a dev/staging env.
 
         Requires a verified domain for public targets; localhost / private IPs are
-        exempt. Never runs on production. Returns {scan_id, status, environment}.
+        exempt. Never runs on production. `goal` is an optional guided attack
+        objective (TODO 3.6.2). Returns {scan_id, status, environment}.
         """
+        payload: dict[str, Any] = {"environment": environment}
+        if goal:
+            payload["goal"] = goal
         return self._request(
             "POST",
             f"/developers/sites/{site_id}/hacker-scans",
-            json={"environment": environment},
+            json=payload,
         )
 
     def list_scans(self, site_id: str) -> list[dict[str, Any]]:

@@ -147,6 +147,26 @@ def test_trigger_hacker_scan() -> None:
     assert captured["body"] == {"environment": "development"}
 
 
+def test_trigger_hacker_scan_with_goal() -> None:
+    """TODO 3.6.2 — guided goal w hacker-mode przez SDK/CLI."""
+    captured: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = json.loads(request.content)
+        return httpx.Response(
+            202,
+            json={"scan_id": "hack456", "status": "queued", "environment": "development"},
+        )
+
+    api = _client(handler)
+    scan = api.trigger_hacker_scan("65fabc", "development", goal="check /users for IDOR")
+    assert scan["scan_id"] == "hack456"
+    assert captured["body"] == {
+        "environment": "development",
+        "goal": "check /users for IDOR",
+    }
+
+
 def test_wait_for_scan_polls_until_completed(monkeypatch) -> None:
     import liveapisec.client as client_mod
 
