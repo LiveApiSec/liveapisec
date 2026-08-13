@@ -643,7 +643,7 @@ def _cmd_hacker(client: LiveAPISec, args: argparse.Namespace) -> int:
             "error: --env (environment name, e.g. development) is required", file=sys.stderr
         )
         return 2
-    scan = client.trigger_hacker_scan(args.site, args.env)
+    scan = client.trigger_hacker_scan(args.site, args.env, goal=args.goal)
     scan_id = scan["scan_id"]
     if args.json:
         print(LiveAPISec.dump(scan))
@@ -656,6 +656,8 @@ def _cmd_hacker(client: LiveAPISec, args: argparse.Namespace) -> int:
             )
         )
         print(f"hacker scan queued: {scan_id} (env={args.env})")
+        if args.goal:
+            print(f"goal: {args.goal}")
     if not args.wait:
         return 0
 
@@ -892,6 +894,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_hacker.add_argument("--site", required=True)
     p_hacker.add_argument(
         "--env", required=True, help="environment name, e.g. development or staging"
+    )
+    p_hacker.add_argument(
+        "--goal",
+        default=None,
+        help="optional guided attack objective, e.g. \"check /users for IDOR\" "
+        "(TODO 3.6.2)",
     )
     p_hacker.add_argument("--wait", action="store_true", help="poll until the agent finishes")
     p_hacker.add_argument("--poll-interval", type=float, default=3.0)
