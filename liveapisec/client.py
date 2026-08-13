@@ -150,6 +150,19 @@ class LiveAPISec:
             payload["commit"] = commit
         return self._request("POST", f"/developers/sites/{site_id}/scans", json=payload)
 
+    # -- hacker mode (TODO 3.6 / 3.6.1) --------------------------------------
+    def trigger_hacker_scan(self, site_id: str, environment: str) -> dict[str, Any]:
+        """Trigger an autonomous AI hacker-mode test (202) on a dev/staging env.
+
+        Requires a verified domain for public targets; localhost / private IPs are
+        exempt. Never runs on production. Returns {scan_id, status, environment}.
+        """
+        return self._request(
+            "POST",
+            f"/developers/sites/{site_id}/hacker-scans",
+            json={"environment": environment},
+        )
+
     def list_scans(self, site_id: str) -> list[dict[str, Any]]:
         return self._request("GET", f"/developers/sites/{site_id}/scans")
 

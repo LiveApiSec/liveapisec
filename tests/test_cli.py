@@ -127,6 +127,26 @@ def test_trigger_scan() -> None:
     assert captured["body"] == {"branch": "main", "commit": "abc"}
 
 
+def test_trigger_hacker_scan() -> None:
+    """TODO 3.6.1 — hacker-mode przez SDK/CLI (dev/stg env, nigdy prod)."""
+    captured: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["url"] = str(request.url)
+        captured["body"] = json.loads(request.content)
+        return httpx.Response(
+            202,
+            json={"scan_id": "hack123", "status": "queued", "environment": "development", "mode": "hacker"},
+        )
+
+    api = _client(handler)
+    scan = api.trigger_hacker_scan("65fabc", "development")
+    assert scan["scan_id"] == "hack123"
+    assert scan["mode"] == "hacker"
+    assert captured["url"].endswith("/developers/sites/65fabc/hacker-scans")
+    assert captured["body"] == {"environment": "development"}
+
+
 def test_wait_for_scan_polls_until_completed(monkeypatch) -> None:
     import liveapisec.client as client_mod
 

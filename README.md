@@ -277,26 +277,49 @@ liveapisec scan --site SITE_ID --branch main --commit "$SHA" \
   is found; `--fail-on critical` only for criticals; omit it → always exit 0
   (except errors).
 
-### 4. `status` — site status + recent scans
+### 4. `hacker` — autonomous AI hacker-mode test (destructive — dev/staging only)
+
+Runs the autonomous AI agent ("real human test") against a **dev/staging**
+environment: the LLM plans an attack, probes endpoints step by step (IDOR/BOLA,
+broken auth, injections, secrets, mass assignment), can **write and run its own
+probe code in a sandbox**, self-corrects, and writes a final evaluation. You watch
+the agent think live in the dashboard.
+
+```bash
+# dev/staging only — NEVER production (it can break/destroy a system)
+liveapisec hacker --site SITE_ID --env development
+liveapisec hacker --site SITE_ID --env staging --wait
+```
+
+- `--env` — environment name defined on the site (e.g. `development`, `staging`).
+  **Production environments are rejected (403).**
+- `--wait` — polls until the AI agent finishes.
+- **Domain verification**: public targets need a verified domain (the dashboard
+  Domains flow). **Localhost / private IPs (e.g. `http://localhost:8000`, `10.x`)
+  are exempt** — no domain verification needed for your own local server.
+- Your API URL and credentials are **never** sent to the AI — only relative paths
+  reach the model; requests are executed server-side in a sandbox.
+
+### 5. `status` — site status + recent scans
 
 ```bash
 liveapisec status --site SITE_ID
 ```
 
-### 5. `findings` — scan results
+### 6. `findings` — scan results
 
 ```bash
 liveapisec findings --site SITE_ID --scan SCAN_ID
 liveapisec findings --site SITE_ID --scan SCAN_ID --json   # raw data (for agents/AI)
 ```
 
-### 6. `sites` — site details
+### 7. `sites` — site details
 
 ```bash
 liveapisec sites --site SITE_ID
 ```
 
-### 7. `scans` — full test (scan) history for a site
+### 8. `scans` — full test (scan) history for a site
 
 See every security test ever run on a site (status, branch/commit, tests run,
 findings by severity) — useful for an agent that wants to know what was tested,
