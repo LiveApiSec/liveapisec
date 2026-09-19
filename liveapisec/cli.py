@@ -9,6 +9,7 @@ Commands:
   findings  — list findings (--json)
   sites     — show a site (endpoints, last_scan)
   certificate — certificate URL + embed snippet for your site
+  connect   — reverse tunnel: act as a proxy for scans against localhost/internal
 
 CI example (gate)::
 
