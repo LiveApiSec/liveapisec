@@ -14,6 +14,7 @@ Then in any project/CI::
 from .cli import main
 from .client import (
     DEFAULT_API_URL,
+    DEFAULT_FRONTEND_URL,
     LiveAPISecError,
     ScanStatus,
     severity_rank,
@@ -21,10 +22,11 @@ from .client import (
 from .codegen import ScanResult, detect_framework, scan_code
 from .config import clear_config, config_path, load_config, save_config
 
-__version__ = "0.1.14"
+__version__ = "0.1.15"
 
 __all__ = [
     "DEFAULT_API_URL",
+    "DEFAULT_FRONTEND_URL",
     "LiveAPISecError",
     "ScanResult",
     "ScanStatus",

@@ -17,7 +17,11 @@ from typing import Any
 
 import httpx
 
-DEFAULT_API_URL = "https://liveapisec.com"
+DEFAULT_API_URL = "https://api.liveapisec.com"
+# Dashboard / docs live on the main domain (Cloudflare Pages SPA). This is NOT the
+# API host: POSTing to it returns 405 by design (static site), so never send API
+# calls here.
+DEFAULT_FRONTEND_URL = "https://liveapisec.com"
 ENV_API_URL = "LIVEAPISEC_API_URL"
 ENV_API_KEY = "LIVEAPISEC_API_KEY"
 

@@ -29,6 +29,7 @@ from typing import Any
 
 from .client import (
     DEFAULT_API_URL,
+    DEFAULT_FRONTEND_URL,
     ENV_API_KEY,
     ENV_API_URL,
     LiveAPISec,
@@ -992,7 +993,7 @@ def _prompt_for_key() -> str:
     print(
         "Generate one in the dashboard:  Settings → Developer API → Create API key", file=sys.stderr
     )
-    print(f"  {DEFAULT_API_URL}/settings", file=sys.stderr)
+    print(f"  {DEFAULT_FRONTEND_URL}/settings", file=sys.stderr)
     print("The key looks like:  las_dev_...", file=sys.stderr)
     print("Tip: no key = only public endpoints can be tested.", file=sys.stderr)
     try:
@@ -1016,7 +1017,7 @@ def _cmd_config(client: LiveAPISec, args: argparse.Namespace) -> int:
     print(f"api_url: {cfg.get('api_url') or '(default ' + DEFAULT_API_URL + ')'}")
     print()
     print("Where to find your key:  Settings → Developer API → Create API key")
-    print(f"  {DEFAULT_API_URL}/settings")
+    print(f"  {DEFAULT_FRONTEND_URL}/settings")
     print("You can also set the environment variables LIVEAPISEC_API_KEY / LIVEAPISEC_API_URL.")
     return 0
 

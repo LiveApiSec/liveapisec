@@ -116,7 +116,7 @@ Paste your API key: las_dev_...
 
 ```bash
 export LIVEAPISEC_API_KEY=las_dev_...          # required
-export LIVEAPISEC_API_URL=https://liveapisec.com   # optional (default)
+export LIVEAPISEC_API_URL=https://api.liveapisec.com   # optional (default; dashboard is liveapisec.com)
 ```
 
 Precedence: `--api-key` / `--api-url` flags → environment variables →
@@ -472,7 +472,7 @@ Python) — use `push-code` to extract endpoints from source, or
 
 Environment:
 - `LIVEAPISEC_API_KEY` — dev API key (las_dev_...), usually already set.
-- `LIVEAPISEC_API_URL` — API base URL (default: https://liveapisec.com).
+- `LIVEAPISEC_API_URL` — API base URL (default: https://api.liveapisec.com).
 - `SITE_ID` — the site id returned by `liveapisec push` / `liveapisec sites`.
 
 Fetch information about the portal (to diagnose and fix issues):
