@@ -60,6 +60,105 @@ def noop(): ...
     assert all(not e["path"].startswith("/startup") for e in result.endpoints)
 
 
+def test_fastapi_apirouter_prefix_same_file(tmp_path) -> None:
+    _write(
+        tmp_path,
+        "app/main.py",
+        """from fastapi import FastAPI, APIRouter
+app = FastAPI()
+router = APIRouter(prefix="/auth")
+
+@router.post("/accept-consent")
+def accept(): ...
+
+@app.get("/health")
+def health(): ...
+""",
+    )
+    eps = {(e["method"], e["path"]) for e in scan_code(str(tmp_path)).endpoints}
+    assert ("POST", "/auth/accept-consent") in eps
+    assert ("GET", "/health") in eps
+    # Without the fix this was emitted unprefixed.
+    assert ("POST", "/accept-consent") not in eps
+
+
+def test_fastapi_include_router_prefix_cross_file(tmp_path) -> None:
+    _write(
+        tmp_path,
+        "app/main.py",
+        """from fastapi import FastAPI
+from .routers import auth
+app = FastAPI()
+app.include_router(auth.router, prefix="/v1")
+""",
+    )
+    _write(
+        tmp_path,
+        "app/routers/auth.py",
+        """from fastapi import APIRouter
+router = APIRouter(prefix="/auth")
+
+@router.post("/accept-consent")
+def accept(): ...
+@router.get("/me")
+def me(): ...
+""",
+    )
+    eps = {(e["method"], e["path"]) for e in scan_code(str(tmp_path)).endpoints}
+    assert ("POST", "/v1/auth/accept-consent") in eps
+    assert ("GET", "/v1/auth/me") in eps
+
+
+def test_fastapi_include_router_imported_router(tmp_path) -> None:
+    _write(
+        tmp_path,
+        "app/main.py",
+        """from fastapi import FastAPI
+from app.routers.auth import router as auth_router
+app = FastAPI()
+app.include_router(auth_router, prefix="/api")
+""",
+    )
+    _write(
+        tmp_path,
+        "app/routers/auth.py",
+        """from fastapi import APIRouter
+router = APIRouter(prefix="/auth")
+
+@router.get("/me")
+def me(): ...
+""",
+    )
+    eps = {(e["method"], e["path"]) for e in scan_code(str(tmp_path)).endpoints}
+    assert ("GET", "/api/auth/me") in eps
+
+
+def test_fastapi_nested_include_router(tmp_path) -> None:
+    _write(
+        tmp_path,
+        "app/main.py",
+        """from fastapi import FastAPI
+from . import api
+app = FastAPI()
+app.include_router(api.router, prefix="/api")
+""",
+    )
+    _write(
+        tmp_path,
+        "app/api.py",
+        """from fastapi import APIRouter
+router = APIRouter()
+sub = APIRouter(prefix="/users")
+router.include_router(sub, prefix="/v2")
+
+@sub.get("/{id}")
+def get_user(id: str): ...
+""",
+    )
+    eps = {(e["method"], e["path"]) for e in scan_code(str(tmp_path)).endpoints}
+    assert ("GET", "/api/v2/users/{id}") in eps
+
+
 # ---------------------------------------------------------------- Flask
 
 

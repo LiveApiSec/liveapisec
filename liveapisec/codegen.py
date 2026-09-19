@@ -273,6 +273,190 @@ def _parse_python(text: str, rel_path: str) -> list[dict[str, str]]:
     return out
 
 
+# ------------------------------------------------- FastAPI prefix resolution
+#
+# FastAPI builds URLs from several pieces: the route decorator path, the
+# `APIRouter(prefix=...)` and every `app.include_router(router, prefix=...)`.
+# The old parser only read decorators, so it emitted "/accept-consent" instead
+# of "/auth/accept-consent". This resolver walks the whole project (resolving
+# imports across files) and reconstructs the full prefix chain.
+
+_FASTAPI_ROUTER_CTORS = {"APIRouter", "FastAPI", "Blueprint"}
+
+
+def _module_name(rel_path: str) -> str:
+    p = rel_path.replace("\\", "/")
+    if p.endswith(".py"):
+        p = p[:-3]
+    parts = [x for x in p.split("/") if x]
+    if parts and parts[-1] == "__init__":
+        parts = parts[:-1]
+    return ".".join(parts)
+
+
+def _str_kw(call: ast.Call, name: str) -> str | None:
+    for kw in call.keywords:
+        if kw.arg == name and isinstance(kw.value, ast.Constant) and isinstance(kw.value.value, str):
+            return kw.value.value
+    return None
+
+
+def _ctor_name(call: ast.Call) -> str | None:
+    fn = call.func
+    if isinstance(fn, ast.Name):
+        return fn.id
+    if isinstance(fn, ast.Attribute):
+        return fn.attr
+    return None
+
+
+def _parse_fastapi(files: list[str], root: str) -> list[dict[str, str]]:
+    """FastAPI parser resolving ``APIRouter(prefix=…)`` + ``include_router(…, prefix=…)``."""
+    entries: dict[str, tuple[ast.Module, str, bool]] = {}
+    for f in files:
+        if not f.endswith(_PY_SUFFIXES):
+            continue
+        rel = _rel(root, f).replace("\\", "/")
+        mod = _module_name(rel)
+        if not mod:
+            continue
+        try:
+            tree = ast.parse(_read(f))
+        except SyntaxError:
+            continue
+        entries[mod] = (tree, rel, os.path.basename(f) == "__init__.py")
+
+    own_prefix: dict[str, str] = {}
+    local_module: dict[tuple[str, str], str] = {}
+    local_symbol: dict[tuple[str, str], tuple[str, str]] = {}
+
+    # Pass A — router definitions + imports (needed to resolve across files).
+    for mod, (tree, _rel_path, is_pkg) in entries.items():
+        package = mod if is_pkg else (mod.rsplit(".", 1)[0] if "." in mod else "")
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.Assign, ast.AnnAssign)):
+                targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+                value = node.value
+                if not isinstance(value, ast.Call):
+                    continue
+                if _ctor_name(value) not in _FASTAPI_ROUTER_CTORS:
+                    continue
+                for tgt in targets:
+                    if isinstance(tgt, ast.Name):
+                        own_prefix[f"{mod}:{tgt.id}"] = _str_kw(value, "prefix") or ""
+            elif isinstance(node, ast.ImportFrom):
+                if node.level == 0:
+                    base = ""
+                else:
+                    base = package
+                    for _ in range(node.level - 1):
+                        base = base.rsplit(".", 1)[0] if "." in base else ""
+                target = ".".join(x for x in (base, node.module or "") if x)
+                for alias in node.names:
+                    local = alias.asname or alias.name
+                    full = f"{target}.{alias.name}" if target else alias.name
+                    if full in entries:
+                        local_module[(mod, local)] = full
+                    else:
+                        local_symbol[(mod, local)] = (target, alias.name)
+            elif isinstance(node, ast.Import):
+                for alias in node.names:
+                    local = alias.asname or alias.name.split(".")[0]
+                    local_module[(mod, local)] = alias.name if alias.asname else alias.name.split(".")[0]
+
+    def _unique_var(name: str) -> str | None:
+        hits = [k for k in own_prefix if k.endswith(f":{name}")]
+        return hits[0] if len(hits) == 1 else None
+
+    def resolve_key(mod: str, node: ast.AST) -> str | None:
+        """Resolve a decorator/include_router target to a ``module:var`` key."""
+        if isinstance(node, ast.Name):
+            name = node.id
+            if f"{mod}:{name}" in own_prefix:
+                return f"{mod}:{name}"
+            if (mod, name) in local_symbol:
+                tmod, orig = local_symbol[(mod, name)]
+                return f"{tmod}:{orig}"
+            if (mod, name) in local_module:
+                return f"{local_module[(mod, name)]}:"
+            return _unique_var(name) or f"{mod}:{name}"
+        if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
+            base = node.value.id
+            if (mod, base) in local_module:
+                return f"{local_module[(mod, base)]}:{node.attr}"
+            if (mod, base) in local_symbol:
+                tmod, orig = local_symbol[(mod, base)]
+                if orig == base:
+                    return f"{tmod}:{node.attr}"
+            return _unique_var(node.attr)
+        return None
+
+    incoming: dict[str, list[tuple[str, str]]] = {}
+    routes: list[tuple[str | None, list[dict[str, str]], str]] = []
+
+    # Pass B — include_router edges + route decorators.
+    for mod, (tree, rel, _is_pkg) in entries.items():
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "include_router"
+                and node.args
+            ):
+                parent = resolve_key(mod, node.func.value) or f"{mod}:__root__"
+                child = resolve_key(mod, node.args[0])
+                if child:
+                    incoming.setdefault(child, []).append(
+                        (parent, _str_kw(node, "prefix") or "")
+                    )
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            for dec in node.decorator_list:
+                infos = _routes_from_decorator(dec)
+                if not infos:
+                    continue
+                ref = None
+                if isinstance(dec, ast.Call) and isinstance(dec.func, ast.Attribute):
+                    ref = resolve_key(mod, dec.func.value)
+                routes.append((ref, infos, f"{rel}:{node.lineno}"))
+
+    memo: dict[str, list[str]] = {}
+
+    def prefix_at(key: str, stack: frozenset[str]) -> list[str]:
+        if not stack and key in memo:
+            return memo[key]
+        base = own_prefix.get(key, "")
+        edges = incoming.get(key, [])
+        if not edges:
+            res = [base]
+        else:
+            mounts: list[str] = []
+            for parent, p in edges:
+                if parent in stack:
+                    continue
+                for pre in prefix_at(parent, stack | {key}):
+                    mounts.append(pre + p)
+            res = [m + base for m in mounts] if mounts else [base]
+        if not stack:
+            memo[key] = res
+        return res
+
+    out: list[dict[str, str]] = []
+    for ref, infos, source in routes:
+        prefixes = prefix_at(ref, frozenset()) if ref else [""]
+        for info in infos:
+            for pre in prefixes:
+                out.append(
+                    {
+                        "method": info["method"],
+                        "path": _norm_path((pre or "") + info["path"]),
+                        "source": source,
+                    }
+                )
+    return out
+
+
 # ---------------------------------------------------------------- Django
 
 
@@ -597,7 +781,9 @@ def scan_code(root: str, framework: str | None = None) -> ScanResult:
     detected = framework or detect_framework(root, files)
 
     endpoints: list[dict[str, str]] = []
-    if detected in ("fastapi", "flask"):
+    if detected == "fastapi":
+        endpoints.extend(_parse_fastapi(files, root))
+    elif detected == "flask":
         for f in files:
             if f.endswith(_PY_SUFFIXES):
                 endpoints.extend(_parse_python(_read(f), _rel(root, f)))
