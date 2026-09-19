@@ -174,6 +174,10 @@ liveapisec push \
 - Instead of a list of endpoints you can provide an OpenAPI spec: `--openapi-url https://api.example.com/openapi.json`.
 - Optional token: `--auth-type jwt --auth-token <TOKEN>` (or `bearer`,
   `cookie --auth-cookie "session=..."`, `api_key --auth-header X-API-Key`).
+- Per-URL automation: `--schedule 6h|12h|24h|weekly` (capped by your plan) and
+  `--access external|internal`. `internal` (dev/localhost/private) is **never
+  auto-tested** by the scheduler — run it on demand via CLI; setting a schedule
+  on an internal URL is rejected.
 
 #### OAuth2 Client Credentials (M2M) — recommended for CI/CD
 
@@ -362,6 +366,36 @@ liveapisec projects --json
 # Only one project
 liveapisec projects --project svc
 ```
+
+### 9. `certificate` — live certificate URL + embed snippet
+
+After a scan is green, publish the live certificate. Choose the scope: whole
+organisation (default), one project, or a single URL.
+
+```bash
+liveapisec certificate                                  # whole organisation
+liveapisec certificate --scope project --project acme
+liveapisec certificate --scope site --site SITE_ID
+liveapisec certificate --type badge   # badge | banner | card | iframe
+```
+
+Paste the returned snippet (`<div data-liveapisec-widget ...>` + `widget.js`)
+into your site, docs or trust page — it updates with every scan.
+
+### 10. `connect` — reverse tunnel (test localhost / internal)
+
+The scan runs on LiveAPISec's scanner, so it normally cannot reach a target that
+exists only on your machine. Start a tunnel — the CLI then acts as a proxy:
+
+```bash
+# terminal 1 — keep running
+liveapisec connect --site SITE_ID
+
+# terminal 2 — route the scan through the CLI
+liveapisec scan --site SITE_ID --wait --tunnel
+```
+
+Only the site's `base_url` host is forwarded (not an open proxy).
 
 ---
 
