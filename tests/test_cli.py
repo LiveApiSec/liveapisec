@@ -873,3 +873,33 @@ def test_cmd_connect_forwards_one_request(monkeypatch, capsys) -> None:
     assert got["result"]["status"] == 200
     assert base64.b64decode(got["result"]["body"]) == b'{"ok":true}'
     assert "localhost:8000" in got["result"]["headers"].get("host", "") or True
+
+
+def test_create_site_sends_schedule_and_access() -> None:
+    captured: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = json.loads(request.content)
+        return httpx.Response(201, json={"site_id": "s1", "access": "internal"})
+
+    _client(handler).create_site(
+        "n",
+        "http://10.0.0.5:8000",
+        endpoints=[{"method": "GET", "path": "/x"}],
+        access="internal",
+        schedule="off",
+    )
+    assert captured["body"]["access"] == "internal"
+    assert captured["body"]["schedule"] == "off"
+
+
+def test_create_site_omits_empty_schedule_access() -> None:
+    captured: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = json.loads(request.content)
+        return httpx.Response(201, json={"site_id": "s1"})
+
+    _client(handler).create_site("n", "https://api.test", endpoints=[{"method": "GET", "path": "/x"}])
+    assert "access" not in captured["body"]
+    assert "schedule" not in captured["body"]

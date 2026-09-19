@@ -422,6 +422,8 @@ def _cmd_push(client: LiveAPISec, args: argparse.Namespace) -> int:
         project=project,
         auth=auth,
         site_id=site_id,
+        schedule=getattr(args, "schedule", None),
+        access=getattr(args, "access", None),
     )
     if args.json:
         print(LiveAPISec.dump(site))
@@ -570,6 +572,8 @@ def _cmd_push_code(client: LiveAPISec, args: argparse.Namespace) -> int:
         project=project,
         auth=auth,
         site_id=site_id,
+        schedule=getattr(args, "schedule", None),
+        access=getattr(args, "access", None),
     )
     if args.json:
         print(LiveAPISec.dump(site))
@@ -909,6 +913,10 @@ def _cmd_sites(client: LiveAPISec, args: argparse.Namespace) -> int:
     if site.get("project"):
         print(f"  project: {site['project']}")
     print(f"  source: {site.get('source')}  last_scan_at: {site.get('last_scan_at')}")
+    print(
+        f"  access: {site.get('access') or 'external'}  "
+        f"schedule: {site.get('schedule') or 'off'}"
+    )
     return 0
 
 
@@ -934,6 +942,16 @@ def build_parser() -> argparse.ArgumentParser:
     p_push.add_argument("--name", help="site name (interactive pick if omitted)")
     p_push.add_argument("--base-url")
     p_push.add_argument("--project")
+    p_push.add_argument(
+        "--schedule",
+        choices=["off", "6h", "12h", "24h", "weekly"],
+        help="auto-test frequency (respects your plan's max; default off)",
+    )
+    p_push.add_argument(
+        "--access",
+        choices=["external", "internal"],
+        help="external = scheduler may auto-test; internal = on-demand only via CLI",
+    )
     p_push.add_argument(
         "--endpoint", action="append", type=_parse_endpoint, help="'METHOD /path' (repeatable)"
     )
@@ -977,6 +995,16 @@ def build_parser() -> argparse.ArgumentParser:
     p_code.add_argument("--name", help="site name (interactive pick if omitted)")
     p_code.add_argument("--base-url", help="base URL (interactive pick if omitted)")
     p_code.add_argument("--project")
+    p_code.add_argument(
+        "--schedule",
+        choices=["off", "6h", "12h", "24h", "weekly"],
+        help="auto-test frequency (respects your plan's max; default off)",
+    )
+    p_code.add_argument(
+        "--access",
+        choices=["external", "internal"],
+        help="external = scheduler may auto-test; internal = on-demand only via CLI",
+    )
     p_code.add_argument("--site", help="existing site_id to update (PUT)")
     p_code.add_argument("--dry-run", action="store_true", help="scan + list endpoints, do not push")
     p_code.add_argument(

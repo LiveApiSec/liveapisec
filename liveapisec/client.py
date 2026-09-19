@@ -123,6 +123,8 @@ class LiveAPISec:
         project: str | None = None,
         auth: dict[str, Any] | None = None,
         site_id: str | None = None,
+        schedule: str | None = None,
+        access: str | None = None,
     ) -> dict[str, Any]:
         """Push a site (idempotent by name+base_url). Without `site_id` → POST (create/update),
         with `site_id` → PUT (explicit update)."""
@@ -135,6 +137,10 @@ class LiveAPISec:
             payload["project"] = project
         if auth:
             payload["auth"] = auth
+        if schedule:
+            payload["schedule"] = schedule
+        if access:
+            payload["access"] = access
         if site_id:
             return self._request("PUT", f"/developers/sites/{site_id}", json=payload)
         return self._request("POST", "/developers/sites", json=payload)
