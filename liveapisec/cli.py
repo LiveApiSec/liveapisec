@@ -591,7 +591,12 @@ def _cmd_scan(client: LiveAPISec, args: argparse.Namespace) -> int:
     if not args.site:
         print("error: --site (site_id) is required", file=sys.stderr)
         return 2
-    scan = client.trigger_scan(args.site, branch=args.branch, commit=args.commit)
+    scan = client.trigger_scan(
+        args.site,
+        branch=args.branch,
+        commit=args.commit,
+        tunnel=getattr(args, "tunnel", False),
+    )
     scan_id = scan["scan_id"]
     if args.json:
         print(LiveAPISec.dump(scan))
@@ -628,6 +633,84 @@ def _cmd_scan(client: LiveAPISec, args: argparse.Namespace) -> int:
             return 1
         if not args.json:
             print(_green(f"{_OK} no findings at or above {gate_sev}"))
+    return 0
+
+
+# Nagłówki hop-by-hop — nie przekazujemy ich do lokalnego requestu.
+_HOP_HEADERS = {
+    "host",
+    "content-length",
+    "connection",
+    "transfer-encoding",
+    "keep-alive",
+    "proxy-authenticate",
+    "proxy-authorization",
+    "te",
+    "trailer",
+    "upgrade",
+}
+
+
+def _cmd_connect(client: LiveAPISec, args: argparse.Namespace) -> int:
+    """Reverse tunnel: CLI wykonuje requesty skanu lokalnie (localhost/wewnętrzne).
+
+    Rejestruje tunel dla site'u i długo-polluje po requesty; każdy wykonuje
+    lokalnie (tylko host z base_url) i odsyła wynik. Ctrl+C zamyka tunel.
+    W innym terminalu: `liveapisec scan --site <id> --tunnel`.
+    """
+    import base64
+
+    import httpx
+
+    opening = client.open_tunnel(args.site)
+    tunnel_id = opening["tunnel_id"]
+    base = opening.get("base_url")
+    allowed_host = httpx.URL(base).host if base else None
+    print(_green(f"{_OK} tunnel open for site {args.site}") + (f"  → {base}" if base else ""))
+    print(_dim(f"  tunnel_id: {tunnel_id}"))
+    if allowed_host:
+        print(_dim(f"  forwarding only to host: {allowed_host}"))
+    print(_dim("waiting for scan requests… (Ctrl+C to stop)"), file=sys.stderr)
+
+    poll = int(getattr(args, "poll_timeout", 25) or 25)
+    try:
+        with httpx.Client(follow_redirects=False, timeout=30.0) as hc:
+            while True:
+                req = client.tunnel_next(tunnel_id, timeout=poll)
+                if not req:
+                    continue
+                rid = req.get("request_id")
+                url = req.get("url") or ""
+                try:
+                    hu = httpx.URL(url)
+                    if allowed_host and hu.host != allowed_host:
+                        raise RuntimeError(f"refusing host {hu.host!r} (only {allowed_host!r})")
+                    body = base64.b64decode(req.get("body") or "")
+                    headers = {
+                        k: v
+                        for k, v in (req.get("headers") or {}).items()
+                        if k.lower() not in _HOP_HEADERS
+                    }
+                    resp = hc.request(
+                        req.get("method", "GET"), url, headers=headers, content=body
+                    )
+                    result: dict = {
+                        "request_id": rid,
+                        "status": resp.status_code,
+                        "headers": dict(resp.headers),
+                        "body": base64.b64encode(resp.content).decode("ascii"),
+                    }
+                except Exception as exc:  # noqa: BLE001 — błąd po stronie CLI
+                    result = {"request_id": rid, "error": str(exc)}
+                client.tunnel_result(tunnel_id, result)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        try:
+            client.close_tunnel(tunnel_id)
+        except Exception:  # noqa: BLE001
+            pass
+        print("\ntunnel closed", file=sys.stderr)
     return 0
 
 
@@ -911,6 +994,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_scan.add_argument("--commit")
     p_scan.add_argument("--wait", action="store_true", help="poll until finished")
     p_scan.add_argument(
+        "--tunnel",
+        action="store_true",
+        help="run through a connected CLI tunnel (localhost/internal targets)",
+    )
+    p_scan.add_argument(
         "--fail-on", choices=_SEV, help="exit 1 if findings at/above this severity (default: high)"
     )
     p_scan.add_argument("--poll-interval", type=float, default=3.0)
@@ -971,6 +1059,15 @@ def build_parser() -> argparse.ArgumentParser:
     p_config = sub.add_parser("config", help="show / manage saved config (API key)")
     p_config.add_argument("--clear", action="store_true", help="remove the saved config file")
     p_config.set_defaults(func=_cmd_config)
+
+    p_connect = sub.add_parser(
+        "connect", help="reverse tunnel — act as a proxy for scans against localhost/internal"
+    )
+    p_connect.add_argument("--site", required=True, help="site id (from `liveapisec sites`)")
+    p_connect.add_argument(
+        "--poll-timeout", type=int, default=25, help="long-poll window in seconds (default 25)"
+    )
+    p_connect.set_defaults(func=_cmd_connect)
 
     p_cert = sub.add_parser(
         "certificate", help="certificate / Trust Page: public URL + embed snippet"
