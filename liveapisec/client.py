@@ -82,7 +82,7 @@ class LiveAPISec:
             "Content-Type": "application/json",
         }
 
-    def _request(self, method: str, path: str, **kw: Any) -> Any:
+    def _request(self, method: str, path: str, timeout: float | None = None, **kw: Any) -> Any:
         if not self.api_key:
             raise LiveAPISecError(
                 None,
@@ -93,7 +93,11 @@ class LiveAPISec:
         try:
             with httpx.Client(transport=self._transport) as client:
                 resp = client.request(
-                    method, url, headers=self._headers(), timeout=self.timeout, **kw
+                    method,
+                    url,
+                    headers=self._headers(),
+                    timeout=timeout or self.timeout,
+                    **kw,
                 )
         except httpx.HTTPError as exc:
             raise LiveAPISecError(None, "Connection error", str(exc)) from exc
@@ -155,15 +159,46 @@ class LiveAPISec:
 
     # -- scans ----------------------------------------------------------------
     def trigger_scan(
-        self, site_id: str, branch: str | None = None, commit: str | None = None
+        self,
+        site_id: str,
+        branch: str | None = None,
+        commit: str | None = None,
+        tunnel: bool = False,
     ) -> dict[str, Any]:
-        """Trigger a scan (202). Returns {scan_id, status, branch, commit}."""
+        """Trigger a scan (202). Returns {scan_id, status, branch, commit}.
+
+        `tunnel=True` routes the scan's HTTP requests through a connected CLI
+        (reverse tunnel) — for localhost/internal targets.
+        """
         payload: dict[str, Any] = {}
         if branch:
             payload["branch"] = branch
         if commit:
             payload["commit"] = commit
+        if tunnel:
+            payload["tunnel"] = True
         return self._request("POST", f"/developers/sites/{site_id}/scans", json=payload)
+
+    # -- reverse tunnel (A): CLI as a proxy for internal/localhost tests ------
+    def open_tunnel(self, site_id: str) -> dict[str, Any]:
+        """Register a tunnel for a site (CLI then long-polls for requests)."""
+        return self._request("POST", "/developers/tunnels", json={"site_id": site_id})
+
+    def tunnel_next(self, tunnel_id: str, timeout: int = 25) -> dict[str, Any] | None:
+        """Long-poll for the next request to execute locally (None = timeout)."""
+        return self._request(
+            "GET",
+            f"/developers/tunnels/{tunnel_id}/next",
+            params={"timeout": timeout},
+            timeout=timeout + 15,
+        )
+
+    def tunnel_result(self, tunnel_id: str, result: dict[str, Any]) -> None:
+        """Post the local execution result back to the waiting worker."""
+        self._request("POST", f"/developers/tunnels/{tunnel_id}/result", json=result)
+
+    def close_tunnel(self, tunnel_id: str) -> None:
+        self._request("DELETE", f"/developers/tunnels/{tunnel_id}")
 
     # -- hacker mode (TODO 3.6 / 3.6.1) --------------------------------------
     def trigger_hacker_scan(

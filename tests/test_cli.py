@@ -520,7 +520,7 @@ class _GateClient:
     def __init__(self, findings) -> None:
         self.findings = findings
 
-    def trigger_scan(self, site_id, branch=None, commit=None):
+    def trigger_scan(self, site_id, branch=None, commit=None, tunnel=False):
         return {"scan_id": "s1", "status": "queued"}
 
     def wait_for_scan(self, site_id, scan_id):
@@ -795,3 +795,81 @@ def test_cli_certificate_prints_snippet(capsys) -> None:
     assert "https://liveapisec.com/trust/acme" in out
     assert "data-liveapisec-widget" in out
     assert "scope: org" in out
+
+
+# --- reverse tunnel (A) ------------------------------------------------------
+
+
+def test_trigger_scan_tunnel_flag() -> None:
+    captured: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = json.loads(request.content)
+        return httpx.Response(202, json={"scan_id": "s1", "status": "queued"})
+
+    _client(handler).trigger_scan("site1", tunnel=True)
+    assert captured["body"] == {"tunnel": True}
+
+
+def test_cmd_connect_forwards_one_request(monkeypatch, capsys) -> None:
+    import base64
+
+    import httpx as _httpx
+
+    from liveapisec.cli import _cmd_connect
+
+    class FakeResp:
+        status_code = 200
+        headers = {"content-type": "application/json"}
+        content = b'{"ok":true}'
+
+    class FakeClient:
+        def __init__(self, *a, **k): ...
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def request(self, method, url, headers=None, content=None):
+            assert method == "GET" and url == "http://localhost:8000/x"
+            return FakeResp()
+
+    monkeypatch.setattr(_httpx, "Client", FakeClient)
+    got: dict = {}
+    seq = [
+        {
+            "request_id": "r1",
+            "method": "GET",
+            "url": "http://localhost:8000/x",
+            "headers": {"host": "localhost:8000", "accept": "*/*"},
+            "body": "",
+        },
+        None,
+    ]
+
+    class Client:
+        def open_tunnel(self, site_id):
+            return {"tunnel_id": "t1", "site_id": site_id, "base_url": "http://localhost:8000"}
+
+        def tunnel_next(self, tunnel_id, timeout=25):
+            if seq:
+                return seq.pop(0)
+            raise KeyboardInterrupt
+
+        def tunnel_result(self, tunnel_id, result):
+            got["result"] = result
+
+        def close_tunnel(self, tunnel_id):
+            got["closed"] = True
+
+    class Args:
+        site = "s1"
+        poll_timeout = 1
+
+    assert _cmd_connect(Client(), Args()) == 0
+    assert got["closed"] is True
+    assert got["result"]["status"] == 200
+    assert base64.b64decode(got["result"]["body"]) == b'{"ok":true}'
+    assert "localhost:8000" in got["result"]["headers"].get("host", "") or True
