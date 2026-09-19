@@ -8,6 +8,7 @@ Commands:
   status    — site status / recent scans
   findings  — list findings (--json)
   sites     — show a site (endpoints, last_scan)
+  certificate — certificate URL + embed snippet for your site
 
 CI example (gate)::
 
@@ -733,6 +734,35 @@ def _cmd_findings(client: LiveAPISec, args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_certificate(client: LiveAPISec, args: argparse.Namespace) -> int:
+    """Certyfikat / Trust Page w wybranym zakresie: publiczny URL + snippet."""
+    data = client.get_certificate(
+        scope=getattr(args, "scope", "org") or "org",
+        project=getattr(args, "project", None),
+        site=getattr(args, "site", None),
+    )
+    if args.json:
+        print(LiveAPISec.dump(data))
+        return 0
+    if data.get("trust_url"):
+        print(f"certificate: {data['trust_url']}")
+    else:
+        print("certificate: (no public trust page/slug for this site yet)")
+    extra = f"  scope: {data.get('scope')}"
+    if data.get("slug"):
+        extra += f"  slug: {data['slug']}"
+    print(_dim(extra))
+    wtype = getattr(args, "type", "badge") or "badge"
+    embeds = data.get("embeds") or {}
+    snippet = embeds.get(wtype) or embeds.get("badge") or ""
+    print()
+    print(f"Embed ({wtype}) — paste into your site/docs:")
+    print(snippet)
+    print()
+    print(_dim("Other types: " + ", ".join(embeds.keys())))
+    return 0
+
+
 def _cmd_projects(client: LiveAPISec, args: argparse.Namespace) -> int:
     """List projects + sites + last scan status — results straight in the terminal."""
     sites = client.list_sites()
@@ -941,6 +971,23 @@ def build_parser() -> argparse.ArgumentParser:
     p_config = sub.add_parser("config", help="show / manage saved config (API key)")
     p_config.add_argument("--clear", action="store_true", help="remove the saved config file")
     p_config.set_defaults(func=_cmd_config)
+
+    p_cert = sub.add_parser(
+        "certificate", help="certificate / Trust Page: public URL + embed snippet"
+    )
+    p_cert.add_argument(
+        "--type", choices=["badge", "banner", "card", "iframe"], default="badge"
+    )
+    p_cert.add_argument(
+        "--scope",
+        choices=["org", "project", "site"],
+        default="org",
+        help="what the certificate covers (default: org)",
+    )
+    p_cert.add_argument("--project", help="project name (scope=project)")
+    p_cert.add_argument("--site", help="site id (scope=site)")
+    _json_flag(p_cert)
+    p_cert.set_defaults(func=_cmd_certificate)
 
     return parser
 
