@@ -142,6 +142,17 @@ class LiveAPISec:
         """All sites for the API key's org (CLI groups them by project)."""
         return self._request("GET", "/developers/sites")
 
+    def get_certificate(
+        self, scope: str = "org", project: str | None = None, site: str | None = None
+    ) -> dict[str, Any]:
+        """Certificate / Trust Page in a chosen scope (org | project | site)."""
+        params: dict[str, str] = {"scope": scope}
+        if project:
+            params["project"] = project
+        if site:
+            params["site"] = site
+        return self._request("GET", "/developers/certificate", params=params)
+
     # -- scans ----------------------------------------------------------------
     def trigger_scan(
         self, site_id: str, branch: str | None = None, commit: str | None = None

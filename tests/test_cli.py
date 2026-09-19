@@ -743,3 +743,55 @@ def test_cli_main_requires_api_key(capsys, monkeypatch) -> None:
         == 2
     )
     assert "Missing API key" in capsys.readouterr().err
+
+
+# --- certificate (scope-aware) -----------------------------------------------
+
+
+def test_get_certificate_scope_sdk() -> None:
+    seen: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["url"] = str(request.url)
+        return httpx.Response(
+            200,
+            json={
+                "scope": "project",
+                "slug": "acme-payments",
+                "trust_url": "https://liveapisec.com/trust/acme-payments",
+                "embeds": {"badge": "<div data-liveapisec-widget></div>"},
+            },
+        )
+
+    data = _client(handler).get_certificate(scope="project", project="payments")
+    assert data["slug"] == "acme-payments"
+    assert "scope=project" in seen["url"]
+    assert "project=payments" in seen["url"]
+
+
+def test_cli_certificate_prints_snippet(capsys) -> None:
+    from liveapisec.cli import _cmd_certificate
+
+    class Client:
+        def get_certificate(self, scope="org", project=None, site=None):
+            return {
+                "scope": "org",
+                "slug": "acme",
+                "trust_url": "https://liveapisec.com/trust/acme",
+                "embeds": {
+                    "badge": '<div data-liveapisec-widget data-slug="acme" data-type="badge"></div>'
+                },
+            }
+
+    class Args:
+        json = False
+        type = "badge"
+        scope = "org"
+        project = None
+        site = None
+
+    assert _cmd_certificate(Client(), Args()) == 0
+    out = capsys.readouterr().out
+    assert "https://liveapisec.com/trust/acme" in out
+    assert "data-liveapisec-widget" in out
+    assert "scope: org" in out
