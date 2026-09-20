@@ -708,12 +708,12 @@ def _cmd_connect(client: LiveAPISec, args: argparse.Namespace) -> int:
                 except Exception as exc:  # noqa: BLE001 — błąd po stronie CLI
                     result = {"request_id": rid, "error": str(exc)}
                 client.tunnel_result(tunnel_id, result)
-    except KeyboardInterrupt:
+    except KeyboardInterrupt:  # Ctrl+C to oczekiwany sposób zamknięcia tunelu
         pass
     finally:
         try:
             client.close_tunnel(tunnel_id)
-        except Exception:  # noqa: BLE001
+        except Exception:  # noqa: BLE001, S110 — sprzątanie nie rwie wyjścia
             pass
         print("\ntunnel closed", file=sys.stderr)
     return 0

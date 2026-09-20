@@ -286,8 +286,7 @@ _FASTAPI_ROUTER_CTORS = {"APIRouter", "FastAPI", "Blueprint"}
 
 def _module_name(rel_path: str) -> str:
     p = rel_path.replace("\\", "/")
-    if p.endswith(".py"):
-        p = p[:-3]
+    p = p.removesuffix(".py")
     parts = [x for x in p.split("/") if x]
     if parts and parts[-1] == "__init__":
         parts = parts[:-1]

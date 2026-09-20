@@ -813,6 +813,7 @@ def test_trigger_scan_tunnel_flag() -> None:
 
 def test_cmd_connect_forwards_one_request(monkeypatch, capsys) -> None:
     import base64
+    from typing import ClassVar
 
     import httpx as _httpx
 
@@ -820,7 +821,7 @@ def test_cmd_connect_forwards_one_request(monkeypatch, capsys) -> None:
 
     class FakeResp:
         status_code = 200
-        headers = {"content-type": "application/json"}
+        headers: ClassVar[dict[str, str]] = {"content-type": "application/json"}
         content = b'{"ok":true}'
 
     class FakeClient:
