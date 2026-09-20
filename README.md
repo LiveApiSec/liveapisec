@@ -363,6 +363,20 @@ liveapisec certificate --site SITE_ID --scan SCAN_ID --pdf --variant full -o cer
 liveapisec certificate --site SITE_ID --scan SCAN_ID --pdf --variant client -o cert-client.pdf
 ```
 
+### 0. `all` — full pipeline in one command (scan → verdict → compliance → report → PDF)
+
+Numbered 0 because it's the easiest path: queues a scan, waits, compares
+against the baseline (explicit `--baseline` or auto = previous completed scan),
+prints the verdict, saves the report + certificate PDF, and exits 1 on
+regressions. Compliance below plan and a missing certificate (scan didn't pass)
+are notes, not errors:
+
+```bash
+liveapisec all --site SITE_ID
+liveapisec all --site SITE_ID --baseline BASE_SCAN --fail-on high --variant client
+liveapisec all --site SITE_ID --hacker --env development   # hacker-mode instead (destructive — dev/staging only)
+```
+
 ### 11. `sites` — site details
 
 ```bash

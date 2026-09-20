@@ -885,6 +885,120 @@ def _cmd_report(client: LiveAPISec, args: argparse.Namespace) -> int:
     return 0
 
 
+def _auto_baseline(client: LiveAPISec, site_id: str, scan_id: str) -> dict[str, Any] | None:
+    """Previous completed scan of the site (newest first) — default baseline."""
+    try:
+        scans = client.list_scans(site_id)
+    except Exception:  # noqa: BLE001 — brak historii to nie błąd, verdict skip
+        return None
+    for s in scans:
+        if s.get("scan_id") != scan_id and s.get("status") == "completed":
+            return s
+    return None
+
+
+def _cmd_all(client: LiveAPISec, args: argparse.Namespace) -> int:
+    """Full pipeline: scan --wait → verdict → compliance → report → PDF."""
+    from liveapisec.client import LiveAPISecError
+
+    if not args.site:
+        print("error: --site (site_id) is required", file=sys.stderr)
+        return 2
+    fail_on = args.fail_on or "high"
+    hacker = bool(getattr(args, "hacker", False))
+    if hacker and not args.env:
+        print("error: --hacker needs --env (e.g. development)", file=sys.stderr)
+        return 2
+
+    # 1. scan (+ wait — `all` zawsze czeka na wynik)
+    if hacker:
+        print(
+            _WARN
+            + _yellow(" hacker mode is DESTRUCTIVE — dev/staging only, never production"),
+            file=sys.stderr,
+        )
+        scan = client.trigger_hacker_scan(
+            args.site, args.env, goal=args.goal, tunnel=getattr(args, "tunnel", False)
+        )
+    else:
+        scan = client.trigger_scan(
+            args.site,
+            branch=args.branch,
+            commit=args.commit,
+            tunnel=getattr(args, "tunnel", False),
+        )
+    scan_id = scan["scan_id"]
+    print(f"scan queued: {scan_id} — waiting…", file=sys.stderr)
+    done = client.wait_for_scan(args.site, scan_id)
+    if not args.json:
+        print(_fmt_scan(done))
+    if done.get("status") != "completed":
+        print(f"scan did not complete (status={done.get('status')})", file=sys.stderr)
+        return 2
+
+    out: dict[str, Any] = {"scan": done}
+
+    # 2. verdict (jawny --baseline albo auto = poprzedni ukończony skan)
+    baseline_id = args.baseline
+    if not baseline_id:
+        prev = _auto_baseline(client, args.site, scan_id)
+        baseline_id = prev.get("scan_id") if prev else None
+    verdict = None
+    if baseline_id:
+        verdict = client.get_verdict(args.site, scan_id, baseline_id, fail_on=fail_on)
+        out["verdict"] = verdict
+        if not args.json:
+            counts = verdict.get("counts") or {}
+            mark = _green("PASS") if verdict.get("verdict") == "pass" else _red("FAIL")
+            print(
+                f"verdict vs {baseline_id[:8]}…: {mark}  "
+                f"new={counts.get('new', 0)} fixed={counts.get('fixed', 0)} "
+                f"persisting={counts.get('persisting', 0)} blocking(>={fail_on})={counts.get('blocking', 0)}"
+            )
+            for f in verdict.get("blocking") or []:
+                print("  " + _red(_fmt_finding(f)), file=sys.stderr)
+    elif not args.json:
+        print(_dim("no earlier completed scan — verdict skipped (first scan)"))
+
+    # 3. compliance (Pro+; poniżej planu → notka, nie błąd)
+    try:
+        out["compliance"] = client.get_compliance(args.site, scan_id)
+    except LiveAPISecError as exc:
+        out["compliance"] = {"error": f"{exc.title}: {exc.detail}"}
+        if not args.json:
+            print(_dim(f"compliance skipped: {exc.title}"))
+
+    # 4. report → plik
+    report = client.get_report(args.site, scan_id)
+    out["report"] = {"scan_id": scan_id}
+    report_path = args.report_out or f"liveapisec-report-{scan_id}.json"
+    with open(report_path, "w", encoding="utf-8") as fh:
+        fh.write(LiveAPISec.dump(report))
+    if not args.json:
+        print(f"report saved: {report_path}")
+
+    # 5. PDF certyfikatu (tylko gdy passed — inaczej 409 → notka)
+    variant = args.variant or "full"
+    try:
+        content, filename = client.download_certificate_pdf(args.site, scan_id, variant)
+        pdf_path = args.pdf_out or filename
+        with open(pdf_path, "wb") as fh:
+            fh.write(content)
+        out["certificate_pdf"] = pdf_path
+        if not args.json:
+            print(f"certificate PDF saved: {pdf_path} (variant={variant})")
+    except LiveAPISecError as exc:
+        out["certificate_pdf"] = {"error": f"{exc.title}: {exc.detail}"}
+        if not args.json:
+            print(_dim(f"certificate PDF skipped: {exc.title}"))
+
+    if args.json:
+        print(LiveAPISec.dump(out))
+    if verdict and verdict.get("verdict") != "pass":
+        return 1
+    return 0
+
+
 def _cmd_certificate(client: LiveAPISec, args: argparse.Namespace) -> int:
     """Certyfikat / Trust Page w wybranym zakresie: publiczny URL + snippet."""
     if getattr(args, "pdf", False):
@@ -1183,6 +1297,24 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _json_flag(p_report)
     p_report.set_defaults(func=_cmd_report)
+
+    p_all = sub.add_parser(
+        "all", help="full pipeline: scan → verdict → compliance → report → certificate PDF"
+    )
+    p_all.add_argument("--site", required=True)
+    p_all.add_argument("--baseline", default=None, help="baseline scan id (default: previous completed scan)")
+    p_all.add_argument("--fail-on", choices=_SEV, default="high")
+    p_all.add_argument("--branch", default=None)
+    p_all.add_argument("--commit", default=None)
+    p_all.add_argument("--tunnel", action="store_true", help="route scan traffic via `connect` tunnel")
+    p_all.add_argument("--hacker", action="store_true", help="hacker-mode AI test instead of a standard scan (destructive — dev/staging only)")
+    p_all.add_argument("--env", default=None, help="environment name (required with --hacker)")
+    p_all.add_argument("--goal", default=None, help="guided goal (with --hacker)")
+    p_all.add_argument("--variant", choices=["full", "client"], default="full", help="certificate PDF variant")
+    p_all.add_argument("--report-out", default=None, help="report file (default: liveapisec-report-<scan>.json)")
+    p_all.add_argument("--pdf-out", default=None, help="certificate PDF file")
+    _json_flag(p_all)
+    p_all.set_defaults(func=_cmd_all)
 
     p_sites = sub.add_parser("sites", help="show a site")
     p_sites.add_argument("--site", required=True)

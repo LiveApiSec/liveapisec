@@ -1013,3 +1013,84 @@ def test_cli_certificate_pdf(tmp_path, capsys) -> None:
     assert _cmd_certificate(Client(), Args()) == 0
     assert out.read_bytes() == b"%PDF-1.4 fake"
     assert "certificate PDF saved" in capsys.readouterr().out
+
+
+# --- all (full pipeline) -----------------------------------------------------
+
+def _all_client(**kw):
+    from liveapisec.client import LiveAPISecError
+
+    class Client:
+        def trigger_scan(self, site, branch=None, commit=None, tunnel=False):
+            return {"scan_id": "new1"}
+
+        def wait_for_scan(self, site, scan_id, timeout=None, interval=None):
+            return {"scan_id": "new1", "status": "completed", "tests_run": 5, "findings": []}
+
+        def list_scans(self, site):
+            return [
+                {"scan_id": "new1", "status": "completed"},
+                {"scan_id": "base9", "status": "completed"},
+            ]
+
+        def get_verdict(self, site, scan, baseline, fail_on="high"):
+            assert baseline == kw.get("baseline", "base9")
+            return {
+                "scan_id": scan, "baseline_scan_id": baseline, "fail_on": fail_on,
+                "verdict": kw.get("verdict", "pass"),
+                "counts": {"new": 0, "fixed": 1, "persisting": 0, "blocking": 0},
+                "blocking": [],
+            }
+
+        def get_compliance(self, site, scan):
+            if kw.get("compliance_402"):
+                raise LiveAPISecError(402, "Upgrade required", "compliance is Pro+")
+            return {"scan_id": scan, "frameworks": {}}
+
+        def get_report(self, site, scan):
+            return {"scan_id": scan, "summary": {}}
+
+        def download_certificate_pdf(self, site, scan, variant="full"):
+            if kw.get("no_pdf"):
+                raise LiveAPISecError(409, "Certificate not available", "scan did not pass")
+            return b"%PDF-1.4 x", "cert.pdf"
+
+    return Client()
+
+
+def _all_args(tmp_path, **kw):
+    class Args:
+        site = "s1"
+        baseline = kw.get("baseline")
+        fail_on = "high"
+        branch = None; commit = None; tunnel = False
+        hacker = False; env = None; goal = None
+        variant = "full"
+        report_out = str(tmp_path / "r.json")
+        pdf_out = str(tmp_path / "c.pdf")
+        json = kw.get("json", False)
+    return Args()
+
+
+def test_cli_all_pass(tmp_path, capsys) -> None:
+    from liveapisec.cli import _cmd_all
+
+    assert _cmd_all(_all_client(), _all_args(tmp_path)) == 0
+    out = capsys.readouterr().out
+    assert "PASS" in out and "report saved" in out and "certificate PDF saved" in out
+    assert (tmp_path / "r.json").exists() and (tmp_path / "c.pdf").exists()
+
+
+def test_cli_all_fail_exit_1(tmp_path, capsys) -> None:
+    from liveapisec.cli import _cmd_all
+
+    assert _cmd_all(_all_client(verdict="fail"), _all_args(tmp_path)) == 1
+    assert "FAIL" in capsys.readouterr().out
+
+
+def test_cli_all_tolerates_402_and_409(tmp_path, capsys) -> None:
+    from liveapisec.cli import _cmd_all
+
+    assert _cmd_all(_all_client(compliance_402=True, no_pdf=True), _all_args(tmp_path)) == 0
+    out = capsys.readouterr().out
+    assert "compliance skipped" in out and "certificate PDF skipped" in out
