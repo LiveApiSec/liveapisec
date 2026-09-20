@@ -1,7 +1,7 @@
 """Static code scanning — discover API endpoints from source code.
 
 Supports FastAPI, Flask, Django, Next.js, NestJS, Express, Laravel, generic PHP
-routers and Spring (Java). Used by the `liveapisec push-code` command so a
+routers and Spring (Java). Used by the `liveapisec scan-code` command so a
 developer can point at a repo/folder and get a list of endpoints pushed to
 LiveAPISec without a running site or OpenAPI spec.
 

@@ -2,7 +2,7 @@
 
 Commands:
   push      — create/update a site + endpoints + optional token (idempotent)
-  push-code — scan source code (fastapi/flask/nextjs/laravel/php) and push endpoints
+  scan-code — scan source code LOCALLY (nothing leaves your machine) and push endpoints
   scan      — run a scan; --wait waits for the result; --fail-on sets the CI gate
   hacker    — run an autonomous AI hacker-mode test (dev/staging only, localhost exempt)
   status    — site status / recent scans
@@ -470,7 +470,7 @@ def _clone_repo(url: str) -> str:
     return tmp
 
 
-def _cmd_push_code(client: LiveAPISec, args: argparse.Namespace) -> int:
+def _cmd_scan_code(client: LiveAPISec, args: argparse.Namespace) -> int:
     root = args.dir or "."
     tmp: str | None = None
     if args.repo:
@@ -590,6 +590,10 @@ def _cmd_push_code(client: LiveAPISec, args: argparse.Namespace) -> int:
     if args.verify and not args.json:
         return _verify_target(site_base, push_endpoints, auth)
     return 0
+
+
+# Backwards-compat alias — the command used to be called `push-code`.
+_cmd_push_code = _cmd_scan_code
 
 
 def _cmd_scan(client: LiveAPISec, args: argparse.Namespace) -> int:
@@ -1269,8 +1273,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_push.set_defaults(func=_cmd_push)
 
     p_code = sub.add_parser(
-        "push-code",
-        help="scan source code for endpoints and push them (fastapi/flask/django/nextjs/nestjs/express/laravel/php/spring/go/rust)",
+        "scan-code",
+        aliases=["push-code"],
+        help="scan source code LOCALLY for endpoints and push them (code never leaves your machine)",
     )
     p_code.add_argument("--dir", default=".", help="project directory or file to scan (default: .)")
     p_code.add_argument(
@@ -1308,7 +1313,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="external = scheduler may auto-test; internal = on-demand only via CLI",
     )
     p_code.add_argument("--site", help="existing site_id to update (PUT)")
-    p_code.add_argument("--dry-run", action="store_true", help="scan + list endpoints, do not push")
+    p_code.add_argument("--dry-run", action="store_true", help="scan locally + list endpoints, do not push (no key needed)")
     p_code.add_argument(
         "--verify",
         action="store_true",
@@ -1316,7 +1321,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _auth_args(p_code)
     _json_flag(p_code)
-    p_code.set_defaults(func=_cmd_push_code)
+    p_code.set_defaults(func=_cmd_scan_code)
 
     p_scan = sub.add_parser("scan", help="run a security scan (optionally wait + gate)")
     p_scan.add_argument("--site", required=True)
@@ -1496,7 +1501,7 @@ def build_parser() -> argparse.ArgumentParser:
 def _needs_key(args: argparse.Namespace) -> bool:
     if args.command == "config":
         return False
-    return not (args.command == "push-code" and getattr(args, "dry_run", False))
+    return not (args.command in ("scan-code", "push-code") and getattr(args, "dry_run", False))
 
 
 def main(argv: list[str] | None = None) -> int:
