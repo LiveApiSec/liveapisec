@@ -302,11 +302,16 @@ class LiveAPISec:
 
     # -- ask-mode (SEC-ASK-N): code-review questionnaire -----------------------
     def create_ask_session(self, site_id: str, include_ai: bool = True) -> dict[str, Any]:
-        """New ask session: 200-question bank + AI questions tailored to the API."""
+        """New ask session: bank + AI questions tailored to the API.
+
+        The server calls the LLM inline, so allow a long timeout (default 30s
+        would abort while the session is still being generated).
+        """
         return self._request(
             "POST",
             f"/developers/sites/{site_id}/ask-sessions",
             json={"include_ai": include_ai},
+            timeout=240.0,
         )
 
     def list_ask_sessions(self, site_id: str) -> list[dict[str, Any]]:
@@ -328,9 +333,14 @@ class LiveAPISec:
         )
 
     def ask_followups(self, session_id: str) -> dict[str, Any]:
-        """Ask the LLM for extra questions based on the answers given so far."""
+        """Ask the LLM for extra questions based on the answers given so far.
+
+        LLM call happens inline on the server → long timeout.
+        """
         return self._request(
-            "POST", f"/developers/ask-sessions/{session_id}/followups"
+            "POST",
+            f"/developers/ask-sessions/{session_id}/followups",
+            timeout=240.0,
         )
 
     # -- CI helpers ------------------------------------------------------------
