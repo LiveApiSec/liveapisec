@@ -1216,3 +1216,77 @@ def test_scan_parser_has_auth_b_flags() -> None:
         args = build_parser().parse_args([cmd, "--site", "s1", "--auth-token-b", "t"])
         assert args.auth_token_b == "t"
         assert args.auth_type_b == "bearer"
+
+
+# --- ask-mode (SEC-ASK-N) --------------------------------------------------------
+
+def _ask_client():
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        if path.endswith("/ask-sessions") and request.method == "POST":
+            return httpx.Response(201, json={"session_id": "sess1", "questions": 200})
+        if path.endswith("/ask-sessions"):
+            return httpx.Response(200, json=[{
+                "session_id": "sess1", "api_spec_id": "s1", "status": "open",
+                "questions": 2,
+                "counts": {"pass": 0, "fail": 1, "na": 0, "unanswered": 1},
+                "failed": [{"qid": "SEC-ASK-1", "category": "authentication",
+                            "question": "MFA?", "fix": "Require.", "note": "no mfa"}],
+            }])
+        if "/answers" in path:
+            return httpx.Response(200, json={
+                "session_id": "sess1", "questions": 2,
+                "counts": {"pass": 1, "fail": 1, "na": 0, "unanswered": 0},
+                "failed": [],
+            })
+        return httpx.Response(200, json={
+            "session_id": "sess1", "status": "open",
+            "counts": {"pass": 0, "fail": 0, "na": 0, "unanswered": 1},
+            "failed": [],
+            "questions": [{"qid": "SEC-ASK-1", "category": "authentication",
+                           "question": "MFA?", "fix": "Require.", "ai": False,
+                           "answer": None}],
+        })
+
+    return _client(handler)
+
+
+def test_cli_ask_new(capsys) -> None:
+    from liveapisec.cli import _cmd_ask_new
+
+    class Args:
+        site = "s1"; no_ai = False; json = False
+
+    assert _cmd_ask_new(_ask_client(), Args()) == 0
+    assert "ask session created: sess1 (200 questions)" in capsys.readouterr().out
+
+
+def test_cli_ask_sessions(capsys) -> None:
+    from liveapisec.cli import _cmd_ask_sessions
+
+    class Args:
+        site = "s1"; json = False
+
+    assert _cmd_ask_sessions(_ask_client(), Args()) == 0
+    out = capsys.readouterr().out
+    assert "fail=1" in out and "SEC-ASK-1" in out
+
+
+def test_cli_ask_answer(capsys) -> None:
+    from liveapisec.cli import _cmd_ask_answer
+
+    class Args:
+        session = "sess1"; question = "SEC-ASK-2"; verdict = "pass"; note = "checked auth.py"; json = False
+
+    assert _cmd_ask_answer(_ask_client(), Args()) == 0
+    assert "pass=1" in capsys.readouterr().out
+
+
+def test_cli_ask_parser() -> None:
+    from liveapisec.cli import build_parser
+
+    args = build_parser().parse_args(
+        ["ask", "answer", "--session", "s", "--question", "SEC-ASK-1",
+         "--verdict", "fail", "--note", "x"]
+    )
+    assert args.ask_command == "answer" and args.verdict == "fail"

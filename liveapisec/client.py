@@ -300,6 +300,33 @@ class LiveAPISec:
             filename = disp.split('filename="', 1)[1].split('"', 1)[0] or filename
         return resp.content, filename
 
+    # -- ask-mode (SEC-ASK-N): code-review questionnaire -----------------------
+    def create_ask_session(self, site_id: str, include_ai: bool = True) -> dict[str, Any]:
+        """New ask session: 200-question bank + AI questions tailored to the API."""
+        return self._request(
+            "POST",
+            f"/developers/sites/{site_id}/ask-sessions",
+            json={"include_ai": include_ai},
+        )
+
+    def list_ask_sessions(self, site_id: str) -> list[dict[str, Any]]:
+        """Ask sessions of a site with answer aggregates."""
+        return self._request("GET", f"/developers/sites/{site_id}/ask-sessions")
+
+    def get_ask_session(self, session_id: str) -> dict[str, Any]:
+        """Full session: questions with answers."""
+        return self._request("GET", f"/developers/ask-sessions/{session_id}")
+
+    def answer_ask_question(
+        self, session_id: str, qid: str, verdict: str, note: str = ""
+    ) -> dict[str, Any]:
+        """Answer one question: verdict = pass | fail | na (+ developer note)."""
+        return self._request(
+            "POST",
+            f"/developers/ask-sessions/{session_id}/answers",
+            json={"qid": qid, "verdict": verdict, "note": note},
+        )
+
     # -- CI helpers ------------------------------------------------------------
     def wait_for_scan(
         self,
