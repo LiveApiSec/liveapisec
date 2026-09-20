@@ -1374,12 +1374,18 @@ def _cmd_ask_answer(client: LiveAPISec, args: argparse.Namespace) -> int:
 
 
 def _cmd_ask_followup(client: LiveAPISec, args: argparse.Namespace) -> int:
-    out = client.ask_followups(args.session)
+    out = client.ask_followups(
+        args.session,
+        rounds=getattr(args, "rounds", 1) or 1,
+        until_dry=bool(getattr(args, "until_dry", False)),
+    )
     if args.json:
         print(LiveAPISec.dump(out))
         return 0
     added = out.get("added", 0)
-    print(f"follow-up questions added: {added}")
+    per_round = out.get("added_per_round") or []
+    rounds = out.get("rounds", len(per_round) or 1)
+    print(f"follow-up questions added: {added} (rounds: {rounds}, per round: {per_round})")
     print(_ask_counts_line(out))
     if added:
         print(_dim("answer them with: liveapisec ask run --session " + args.session))
@@ -1787,6 +1793,14 @@ def build_parser() -> argparse.ArgumentParser:
         "followup", help="AI adds questions based on the answers you gave"
     )
     p_ask_fu.add_argument("--session", required=True)
+    p_ask_fu.add_argument(
+        "--rounds", type=int, default=1, help="how many AI passes (default 1)"
+    )
+    p_ask_fu.add_argument(
+        "--until-dry",
+        action="store_true",
+        help="keep asking until a pass adds no new questions (cap 5)",
+    )
     _json_flag(p_ask_fu)
     p_ask_fu.set_defaults(func=_cmd_ask_followup)
 
