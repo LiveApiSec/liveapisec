@@ -520,7 +520,7 @@ class _GateClient:
     def __init__(self, findings) -> None:
         self.findings = findings
 
-    def trigger_scan(self, site_id, branch=None, commit=None, tunnel=False):
+    def trigger_scan(self, site_id, branch=None, commit=None, tunnel=False, auth_b=None):
         return {"scan_id": "s1", "status": "queued"}
 
     def wait_for_scan(self, site_id, scan_id):
@@ -1021,7 +1021,7 @@ def _all_client(**kw):
     from liveapisec.client import LiveAPISecError
 
     class Client:
-        def trigger_scan(self, site, branch=None, commit=None, tunnel=False):
+        def trigger_scan(self, site, branch=None, commit=None, tunnel=False, auth_b=None):
             return {"scan_id": "new1"}
 
         def wait_for_scan(self, site, scan_id, timeout=None, interval=None):
@@ -1174,3 +1174,45 @@ def test_scan_code_alias_parses_to_same_command() -> None:
         args = build_parser().parse_args([name, "--dir", ".", "--dry-run"])
         assert args.func is _cmd_scan_code
         assert _cmd_scan_code.__name__ == '_cmd_scan_code'
+
+
+# --- auth-matrix (second identity) -------------------------------------------
+
+def test_auth_b_payload_builds_bearer() -> None:
+    from liveapisec.cli import _auth_b_payload
+
+    class Args:
+        auth_type_b = "bearer"; auth_token_b = "tok123"
+
+    assert _auth_b_payload(Args()) == {"auth_method": "bearer", "fields": {"token": "tok123"}}
+
+
+def test_auth_b_payload_none_when_no_token() -> None:
+    from liveapisec.cli import _auth_b_payload
+
+    class Args:
+        auth_type_b = "bearer"; auth_token_b = None
+
+    assert _auth_b_payload(Args()) is None
+
+
+def test_trigger_scan_sends_auth_b() -> None:
+    captured: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = json.loads(request.content)
+        return httpx.Response(202, json={"scan_id": "s1", "status": "queued"})
+
+    _client(handler).trigger_scan(
+        "site1", auth_b={"auth_method": "bearer", "fields": {"token": "second"}}
+    )
+    assert captured["body"]["auth_b"]["fields"] == {"token": "second"}
+
+
+def test_scan_parser_has_auth_b_flags() -> None:
+    from liveapisec.cli import build_parser
+
+    for cmd in ("scan", "all"):
+        args = build_parser().parse_args([cmd, "--site", "s1", "--auth-token-b", "t"])
+        assert args.auth_token_b == "t"
+        assert args.auth_type_b == "bearer"
