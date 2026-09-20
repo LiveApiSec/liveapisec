@@ -380,6 +380,28 @@ liveapisec all --site SITE_ID --baseline BASE_SCAN --fail-on high --variant clie
 liveapisec all --site SITE_ID --hacker --env development   # hacker-mode instead (destructive — dev/staging only)
 ```
 
+### Auth-matrix RBAC test — two identities, no source code needed
+
+Role checks (user role vs organization role, cross-tenant isolation) can't be
+tested with one token. Pass a **second identity** and the scanner diffs every
+endpoint as anonymous / A / B: secured endpoints reachable anonymously, A
+allowed where B is blocked (inconsistent tiers), confirmed BOLA (A reads two
+different objects), and admin paths exposed to A:
+
+```bash
+# CI: two tokens from secrets (e.g. a low-priv user + an admin)
+liveapisec scan --site SITE_ID --wait \
+  --auth-token-b "$USER_B_JWT" --auth-type-b bearer
+liveapisec all --site SITE_ID --auth-token-b "$USER_B_JWT"
+```
+
+- Identity **A** = the scan's normal auth (saved credential in
+  Settings → Credentials, or `--auth-type/--auth-token` on push).
+- Identity **B** = `--auth-token-b` (transient: encrypted server-side, lives
+  only on this scan) or a saved credential with slot **B** (panel/CI reuse).
+- Findings land in category `rbac` (high/medium) and flow into
+  verdict → report (md) → compliance → PDF like everything else.
+
 ### 11. `sites` — site details
 
 ```bash

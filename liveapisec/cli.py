@@ -596,6 +596,41 @@ def _cmd_scan_code(client: LiveAPISec, args: argparse.Namespace) -> int:
 _cmd_push_code = _cmd_scan_code
 
 
+def _auth_b_payload(args: argparse.Namespace) -> dict[str, Any] | None:
+    """Second identity for the auth-matrix RBAC test (None = matrix off)."""
+    token_b = getattr(args, "auth_token_b", None)
+    if not token_b:
+        return None
+    method_b = (getattr(args, "auth_type_b", None) or "bearer").lower()
+    if method_b not in ("bearer", "api_key", "basic", "cookie"):
+        print("error: --auth-type-b must be bearer, api_key, basic or cookie", file=sys.stderr)
+        raise SystemExit(2)
+    if method_b == "api_key":
+        fields: dict[str, str] = {"api_key": token_b}
+    elif method_b == "basic":
+        user, _, pwd = token_b.partition(":")
+        fields = {"username": user, "password": pwd}
+    elif method_b == "cookie":
+        fields = {"cookie": token_b}
+    else:
+        fields = {"token": token_b}
+    return {"auth_method": method_b, "fields": fields}
+
+
+def _auth_b_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--auth-type-b",
+        choices=["bearer", "api_key", "basic", "cookie"],
+        default="bearer",
+        help="second identity type for the auth-matrix RBAC test",
+    )
+    parser.add_argument(
+        "--auth-token-b",
+        default=None,
+        help="second identity secret (e.g. another user's JWT) — enables the auth-matrix RBAC test",
+    )
+
+
 def _cmd_scan(client: LiveAPISec, args: argparse.Namespace) -> int:
     if not args.site:
         print("error: --site (site_id) is required", file=sys.stderr)
@@ -605,12 +640,15 @@ def _cmd_scan(client: LiveAPISec, args: argparse.Namespace) -> int:
         branch=args.branch,
         commit=args.commit,
         tunnel=getattr(args, "tunnel", False),
+        auth_b=_auth_b_payload(args),
     )
     scan_id = scan["scan_id"]
     if args.json:
         print(LiveAPISec.dump(scan))
     else:
         print(f"scan queued: {scan_id}")
+    if not args.json and getattr(args, "auth_token_b", None):
+        print(_dim("auth-matrix RBAC test enabled (second identity)"))
     if not args.wait:
         return 0
 
@@ -947,6 +985,7 @@ def _cmd_all(client: LiveAPISec, args: argparse.Namespace) -> int:
             branch=args.branch,
             commit=args.commit,
             tunnel=getattr(args, "tunnel", False),
+            auth_b=_auth_b_payload(args),
         )
     scan_id = scan["scan_id"]
     print(f"scan queued: {scan_id} — waiting…", file=sys.stderr)
@@ -1336,6 +1375,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_scan.add_argument(
         "--fail-on", choices=_SEV, help="exit 1 if findings at/above this severity (default: high)"
     )
+    _auth_b_args(p_scan)
     p_scan.add_argument("--poll-interval", type=float, default=3.0)
     p_scan.add_argument("--timeout", type=float, default=600.0)
     _json_flag(p_scan)
@@ -1437,6 +1477,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="report format for --report-out (default: md — full run report)",
     )
     p_all.add_argument("--pdf-out", default=None, help="certificate PDF file")
+    _auth_b_args(p_all)
     _json_flag(p_all)
     p_all.set_defaults(func=_cmd_all)
 

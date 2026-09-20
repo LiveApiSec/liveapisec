@@ -170,11 +170,15 @@ class LiveAPISec:
         branch: str | None = None,
         commit: str | None = None,
         tunnel: bool = False,
+        auth_b: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Trigger a scan (202). Returns {scan_id, status, branch, commit}.
 
         `tunnel=True` routes the scan's HTTP requests through a connected CLI
         (reverse tunnel) — for localhost/internal targets.
+        `auth_b` is a second identity for the auth-matrix RBAC test, e.g.
+        `{"auth_method": "bearer", "fields": {"token": "..."}}` — it is
+        encrypted server-side and lives only on this scan's document.
         """
         payload: dict[str, Any] = {}
         if branch:
@@ -183,6 +187,8 @@ class LiveAPISec:
             payload["commit"] = commit
         if tunnel:
             payload["tunnel"] = True
+        if auth_b:
+            payload["auth_b"] = auth_b
         return self._request("POST", f"/developers/sites/{site_id}/scans", json=payload)
 
     # -- reverse tunnel (A): CLI as a proxy for internal/localhost tests ------
