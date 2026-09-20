@@ -330,13 +330,46 @@ liveapisec findings --site SITE_ID --scan SCAN_ID
 liveapisec findings --site SITE_ID --scan SCAN_ID --json   # raw data (for agents/AI)
 ```
 
-### 7. `sites` — site details
+### 7. `verdict` — CI regression gate (new/fixed vs baseline)
+
+Compares the scan against a baseline (e.g. last green deploy): `new` findings
+are regressions, `fixed` disappeared, `persisting` were already known. Exits 1
+when NEW findings reach `--fail-on` (default: high) — the real fix-and-rescan gate:
+
+```bash
+liveapisec verdict --site SITE_ID --scan NEW_SCAN --baseline BASE_SCAN --fail-on high
+```
+
+### 8. `compliance` — PCI DSS / SOC 2 / ISO 27001 / GDPR / NIS2 (Pro+)
+
+Illustrative mapping of open findings onto framework requirements (with
+disclaimer — not a certification):
+
+```bash
+liveapisec compliance --site SITE_ID --scan SCAN_ID
+```
+
+### 9. `report` — full saved scan report
+
+```bash
+liveapisec report --site SITE_ID --scan SCAN_ID -o report.json   # save to file
+liveapisec report --site SITE_ID --scan SCAN_ID --json           # print to stdout
+```
+
+### 10. `certificate --pdf` — download the certificate (passed scans only)
+
+```bash
+liveapisec certificate --site SITE_ID --scan SCAN_ID --pdf --variant full -o cert.pdf
+liveapisec certificate --site SITE_ID --scan SCAN_ID --pdf --variant client -o cert-client.pdf
+```
+
+### 11. `sites` — site details
 
 ```bash
 liveapisec sites --site SITE_ID
 ```
 
-### 8. `scans` — full test (scan) history for a site
+### 12. `scans` — full test (scan) history for a site
 
 See every security test ever run on a site (status, branch/commit, tests run,
 findings by severity) — useful for an agent that wants to know what was tested,
@@ -351,7 +384,7 @@ liveapisec scans --site SITE_ID --json        # raw list (for scripts / agents)
 liveapisec scans --site SITE_ID --limit 5     # only the 5 most recent
 ```
 
-### 8. `projects` — last test status per project (no dashboard needed)
+### 13. `projects` — last test status per project (no dashboard needed)
 
 See every project, its sites and the **last security test result** straight in the
 terminal — no need to open the dashboard:
@@ -386,7 +419,7 @@ liveapisec certificate --type badge   # badge | banner | card | iframe
 Paste the returned snippet (`<div data-liveapisec-widget ...>` + `widget.js`)
 into your site, docs or trust page — it updates with every scan.
 
-### 10. `connect` — reverse tunnel (test localhost / internal)
+### 14. `connect` — reverse tunnel (test localhost / internal)
 
 The scan runs on LiveAPISec's scanner, so it normally cannot reach a target that
 exists only on your machine. Start a tunnel — the CLI then acts as a proxy:

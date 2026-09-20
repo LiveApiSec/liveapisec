@@ -824,8 +824,81 @@ def _cmd_findings(client: LiveAPISec, args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_verdict(client: LiveAPISec, args: argparse.Namespace) -> int:
+    """CI regression gate: new/fixed/persisting vs baseline (exit 1 on regressions)."""
+    if not args.site or not args.scan or not args.baseline:
+        print("error: --site, --scan and --baseline are required", file=sys.stderr)
+        return 2
+    v = client.get_verdict(args.site, args.scan, args.baseline, fail_on=args.fail_on)
+    if args.json:
+        print(LiveAPISec.dump(v))
+        return 0 if v.get("verdict") == "pass" else 1
+    counts = v.get("counts") or {}
+    print(f"verdict: {v.get('verdict', '?').upper()}")
+    print(
+        f"  new: {counts.get('new', 0)}  "
+        f"fixed: {counts.get('fixed', 0)}  "
+        f"persisting: {counts.get('persisting', 0)}  "
+        f"blocking (>={v.get('fail_on')}): {counts.get('blocking', 0)}"
+    )
+    for f in v.get("blocking") or []:
+        print("  " + _red(_fmt_finding(f)), file=sys.stderr)
+    return 0 if v.get("verdict") == "pass" else 1
+
+
+def _cmd_compliance(client: LiveAPISec, args: argparse.Namespace) -> int:
+    """Compliance mapping (PCI DSS / SOC 2 / ISO 27001 / GDPR / NIS2, Pro+)."""
+    if not args.site or not args.scan:
+        print("error: --site and --scan are required", file=sys.stderr)
+        return 2
+    data = client.get_compliance(args.site, args.scan)
+    if args.json:
+        print(LiveAPISec.dump(data))
+        return 0
+    print(f"compliance mapping for scan {args.scan} (open findings only):")
+    frameworks = data.get("frameworks") or {}
+    for key in ("pci_dss", "soc2", "iso27001", "gdpr", "nis2"):
+        fw = frameworks.get(key) or {}
+        if not fw:
+            continue
+        failed = fw.get("failed", 0)
+        total = fw.get("requirements_with_findings", 0)
+        mark = _red(f"{failed} failed") if failed else _green("ok")
+        print(f"  {fw.get('name', key)}: {mark}  ({total} requirements with findings)")
+    print(_dim("illustrative mapping within the scanner scope — not a certification"))
+    return 0
+
+
+def _cmd_report(client: LiveAPISec, args: argparse.Namespace) -> int:
+    """Full saved scan report — print (--json) or save to a file."""
+    if not args.site or not args.scan:
+        print("error: --site and --scan are required", file=sys.stderr)
+        return 2
+    data = client.get_report(args.site, args.scan)
+    if args.json:
+        print(LiveAPISec.dump(data))
+        return 0
+    out = args.output or f"liveapisec-report-{args.scan}.json"
+    with open(out, "w", encoding="utf-8") as fh:
+        fh.write(LiveAPISec.dump(data))
+    print(f"report saved: {out}")
+    return 0
+
+
 def _cmd_certificate(client: LiveAPISec, args: argparse.Namespace) -> int:
     """Certyfikat / Trust Page w wybranym zakresie: publiczny URL + snippet."""
+    if getattr(args, "pdf", False):
+        # PDF z konkretnego skanu (tylko gdy passed) — zapis do pliku.
+        if not args.site or not args.scan:
+            print("error: --pdf needs --site and --scan", file=sys.stderr)
+            return 2
+        variant = getattr(args, "variant", None) or "full"
+        content, filename = client.download_certificate_pdf(args.site, args.scan, variant)
+        out = args.output or filename
+        with open(out, "wb") as fh:
+            fh.write(content)
+        print(f"certificate PDF saved: {out} ({len(content)} bytes, variant={variant})")
+        return 0
     data = client.get_certificate(
         scope=getattr(args, "scope", "org") or "org",
         project=getattr(args, "project", None),
@@ -1079,6 +1152,38 @@ def build_parser() -> argparse.ArgumentParser:
     _json_flag(p_find)
     p_find.set_defaults(func=_cmd_findings)
 
+    p_verdict = sub.add_parser(
+        "verdict", help="CI regression gate: new/fixed vs baseline (exit 1 on regressions)"
+    )
+    p_verdict.add_argument("--site", required=True)
+    p_verdict.add_argument("--scan", required=True, help="current scan id")
+    p_verdict.add_argument("--baseline", required=True, help="baseline scan id")
+    p_verdict.add_argument(
+        "--fail-on",
+        choices=_SEV,
+        default="high",
+        help="fail when NEW findings reach this severity (default: high)",
+    )
+    _json_flag(p_verdict)
+    p_verdict.set_defaults(func=_cmd_verdict)
+
+    p_compliance = sub.add_parser(
+        "compliance", help="compliance mapping: PCI DSS / SOC 2 / ISO 27001 / GDPR / NIS2 (Pro+)"
+    )
+    p_compliance.add_argument("--site", required=True)
+    p_compliance.add_argument("--scan", required=True)
+    _json_flag(p_compliance)
+    p_compliance.set_defaults(func=_cmd_compliance)
+
+    p_report = sub.add_parser("report", help="full saved scan report (print or save)")
+    p_report.add_argument("--site", required=True)
+    p_report.add_argument("--scan", required=True)
+    p_report.add_argument(
+        "-o", "--output", default=None, help="save to file (default: liveapisec-report-<scan>.json)"
+    )
+    _json_flag(p_report)
+    p_report.set_defaults(func=_cmd_report)
+
     p_sites = sub.add_parser("sites", help="show a site")
     p_sites.add_argument("--site", required=True)
     _json_flag(p_sites)
@@ -1119,6 +1224,18 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_cert.add_argument("--project", help="project name (scope=project)")
     p_cert.add_argument("--site", help="site id (scope=site)")
+    p_cert.add_argument(
+        "--pdf",
+        action="store_true",
+        help="download the certificate PDF for --scan (only when the scan passed)",
+    )
+    p_cert.add_argument(
+        "--variant", choices=["full", "client"], default="full", help="PDF variant"
+    )
+    p_cert.add_argument("--scan", help="scan id (with --pdf)")
+    p_cert.add_argument(
+        "-o", "--output", default=None, help="output file (with --pdf/--report)"
+    )
     _json_flag(p_cert)
     p_cert.set_defaults(func=_cmd_certificate)
 

@@ -916,3 +916,100 @@ def test_create_site_omits_empty_schedule_access() -> None:
     _client(handler).create_site("n", "https://api.test", endpoints=[{"method": "GET", "path": "/x"}])
     assert "access" not in captured["body"]
     assert "schedule" not in captured["body"]
+
+
+# --- verdict / compliance / report / certificate PDF -------------------------
+
+def _verdict_payload(verdict="fail"):
+    return {
+        "scan_id": "cur", "baseline_scan_id": "base", "fail_on": "high",
+        "verdict": verdict,
+        "counts": {"new": 1, "fixed": 2, "persisting": 3, "blocking": 1 if verdict == "fail" else 0},
+        "blocking": [{"severity": "high", "title": "IDOR", "target": "GET /u"}] if verdict == "fail" else [],
+        "new": [], "fixed": [], "persisting": [],
+    }
+
+
+def test_cli_verdict_fail_exit_1(capsys) -> None:
+    from liveapisec.cli import _cmd_verdict
+
+    class Args:
+        site = "s1"; scan = "cur"; baseline = "base"; fail_on = "high"; json = False
+
+    class Client:
+        def get_verdict(self, site, scan, baseline, fail_on="high"):
+            assert (site, scan, baseline, fail_on) == ("s1", "cur", "base", "high")
+            return _verdict_payload("fail")
+
+    assert _cmd_verdict(Client(), Args()) == 1
+    captured = capsys.readouterr()
+    assert "verdict: FAIL" in captured.out and "IDOR" in captured.err
+
+
+def test_cli_verdict_pass_exit_0(capsys) -> None:
+    from liveapisec.cli import _cmd_verdict
+
+    class Args:
+        site = "s1"; scan = "cur"; baseline = "base"; fail_on = "high"; json = False
+
+    class Client:
+        def get_verdict(self, site, scan, baseline, fail_on="high"):
+            return _verdict_payload("pass")
+
+    assert _cmd_verdict(Client(), Args()) == 0
+
+
+def test_cli_compliance(capsys) -> None:
+    from liveapisec.cli import _cmd_compliance
+
+    class Args:
+        site = "s1"; scan = "cur"; json = False
+
+    class Client:
+        def get_compliance(self, site, scan):
+            return {
+                "scan_id": "cur",
+                "frameworks": {
+                    "pci_dss": {"name": "PCI DSS 4.0", "failed": 1, "requirements_with_findings": 2},
+                    "gdpr": {"name": "GDPR", "failed": 0, "requirements_with_findings": 0},
+                },
+            }
+
+    assert _cmd_compliance(Client(), Args()) == 0
+    out = capsys.readouterr().out
+    assert "PCI DSS 4.0" in out and "GDPR" in out
+
+
+def test_cli_report_saves_file(tmp_path, capsys) -> None:
+    from liveapisec.cli import _cmd_report
+
+    out = tmp_path / "r.json"
+
+    class Args:
+        site = "s1"; scan = "cur"; json = False; output = str(out)
+
+    class Client:
+        def get_report(self, site, scan):
+            return {"scan_id": "cur", "summary": {}}
+
+    assert _cmd_report(Client(), Args()) == 0
+    assert '"scan_id": "cur"' in out.read_text()
+
+
+def test_cli_certificate_pdf(tmp_path, capsys) -> None:
+    from liveapisec.cli import _cmd_certificate
+
+    out = tmp_path / "c.pdf"
+
+    class Args:
+        site = "s1"; scan = "cur"; pdf = True; variant = "full"; output = str(out)
+        json = False; scope = "org"; project = None; type = "badge"
+
+    class Client:
+        def download_certificate_pdf(self, site, scan, variant="full"):
+            assert (site, scan, variant) == ("s1", "cur", "full")
+            return b"%PDF-1.4 fake", "liveapisec-certificate-full-cur.pdf"
+
+    assert _cmd_certificate(Client(), Args()) == 0
+    assert out.read_bytes() == b"%PDF-1.4 fake"
+    assert "certificate PDF saved" in capsys.readouterr().out

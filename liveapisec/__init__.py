@@ -22,7 +22,7 @@ from .client import (
 from .codegen import ScanResult, detect_framework, scan_code
 from .config import clear_config, config_path, load_config, save_config
 
-__version__ = "0.1.21"
+__version__ = "0.1.22"
 
 __all__ = [
     "DEFAULT_API_URL",
