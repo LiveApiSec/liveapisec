@@ -332,15 +332,19 @@ class LiveAPISec:
             json={"qid": qid, "verdict": verdict, "note": note},
         )
 
-    def ask_followups(self, session_id: str) -> dict[str, Any]:
+    def ask_followups(
+        self, session_id: str, rounds: int = 1, until_dry: bool = False
+    ) -> dict[str, Any]:
         """Ask the LLM for extra questions based on the answers given so far.
 
-        LLM call happens inline on the server → long timeout.
+        `rounds` = number of passes; `until_dry` = repeat until a pass adds nothing.
+        LLM calls happen inline on the server → long timeout (scaled by rounds).
         """
         return self._request(
             "POST",
             f"/developers/ask-sessions/{session_id}/followups",
-            timeout=240.0,
+            params={"rounds": rounds, "until_dry": str(bool(until_dry)).lower()},
+            timeout=240.0 * max(1, min(rounds, 5)),
         )
 
     # -- CI helpers ------------------------------------------------------------
