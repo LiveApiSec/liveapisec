@@ -1050,6 +1050,9 @@ def _all_client(**kw):
         def get_report(self, site, scan):
             return {"scan_id": scan, "summary": {}}
 
+        def get_findings(self, site, scan):
+            return []
+
         def download_certificate_pdf(self, site, scan, variant="full"):
             if kw.get("no_pdf"):
                 raise LiveAPISecError(409, "Certificate not available", "scan did not pass")
@@ -1094,3 +1097,69 @@ def test_cli_all_tolerates_402_and_409(tmp_path, capsys) -> None:
     assert _cmd_all(_all_client(compliance_402=True, no_pdf=True), _all_args(tmp_path)) == 0
     out = capsys.readouterr().out
     assert "compliance skipped" in out and "certificate PDF skipped" in out
+
+
+# --- markdown report ---------------------------------------------------------
+
+def _md_client():
+    class Client:
+        def get_report(self, site, scan):
+            return {
+                "scan_id": scan, "status": "completed",
+                "summary": {"tests_run": 10, "duration_s": 3.2, "findings": 2,
+                            "by_severity": {"high": 1, "low": 1}},
+            }
+
+        def get_findings(self, site, scan):
+            return [
+                {"severity": "high", "title": "IDOR", "target": "GET /u/{id}", "category": "bola"},
+                {"severity": "low", "title": "Verbose header", "target": "GET /", "category": "headers"},
+            ]
+
+    return Client()
+
+
+def test_cli_report_md(tmp_path, capsys) -> None:
+    from liveapisec.cli import _cmd_report
+
+    out = tmp_path / "r.md"
+
+    class Args:
+        site = "s1"; scan = "s9"; json = False; output = str(out); format = "md"
+
+    assert _cmd_report(_md_client(), Args()) == 0
+    text = out.read_text()
+    assert text.startswith("# LiveAPIsec security report")
+    assert "| high | IDOR |" in text
+    assert "report saved" in capsys.readouterr().out
+
+
+def test_cli_all_md_report_with_verdict(tmp_path, capsys) -> None:
+    from liveapisec.cli import _cmd_all
+
+    class Client(_all_client().__class__):
+        pass
+
+    base = _all_client()
+
+    class Args:
+        site = "s1"
+        baseline = None
+        fail_on = "high"
+        branch = None; commit = None; tunnel = False
+        hacker = False; env = None; goal = None
+        variant = "full"
+        report_out = str(tmp_path / "run.md")
+        pdf_out = str(tmp_path / "c.pdf")
+        format = "md"
+        json = False
+
+    # reuse stub methods from _all_client via delegation
+    class Delegating:
+        def __getattr__(self, name):
+            return getattr(base, name)
+
+    assert _cmd_all(Delegating(), Args()) == 0
+    text = (tmp_path / "run.md").read_text()
+    assert "Regression verdict vs baseline" in text
+    assert "report saved" in capsys.readouterr().out

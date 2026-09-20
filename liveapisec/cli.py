@@ -870,18 +870,35 @@ def _cmd_compliance(client: LiveAPISec, args: argparse.Namespace) -> int:
 
 
 def _cmd_report(client: LiveAPISec, args: argparse.Namespace) -> int:
-    """Full saved scan report — print (--json) or save to a file."""
+    """Full saved scan report — print (--json) or save (JSON or Markdown)."""
     if not args.site or not args.scan:
         print("error: --site and --scan are required", file=sys.stderr)
+        return 2
+    fmt = (getattr(args, "format", None) or "json").lower()
+    if fmt not in ("json", "md"):
+        print("error: --format must be json or md", file=sys.stderr)
         return 2
     data = client.get_report(args.site, args.scan)
     if args.json:
         print(LiveAPISec.dump(data))
         return 0
-    out = args.output or f"liveapisec-report-{args.scan}.json"
+    fmt = (getattr(args, "format", None) or "json").lower()
+    out = args.output
+    if fmt not in ("json", "md"):
+        print("error: --format must be json or md", file=sys.stderr)
+        return 2
+    if out and out.endswith(".md"):
+        fmt = "md"
+    if fmt == "md":
+        findings = client.get_findings(args.site, args.scan)
+        text = _md_report({"scan_id": args.scan, **data}, findings)
+        out = out or f"liveapisec-report-{args.scan}.md"
+    else:
+        text = LiveAPISec.dump(data)
+        out = out or f"liveapisec-report-{args.scan}.json"
     with open(out, "w", encoding="utf-8") as fh:
-        fh.write(LiveAPISec.dump(data))
-    print(f"report saved: {out}")
+        fh.write(text if text.endswith("\n") else text + "\n")
+    print(f"report saved: {out} (format={fmt})")
     return 0
 
 
@@ -968,14 +985,31 @@ def _cmd_all(client: LiveAPISec, args: argparse.Namespace) -> int:
         if not args.json:
             print(_dim(f"compliance skipped: {exc.title}"))
 
-    # 4. report → plik
+    # 4. report → plik (JSON albo Markdown z verdict + compliance w środku)
     report = client.get_report(args.site, scan_id)
     out["report"] = {"scan_id": scan_id}
-    report_path = args.report_out or f"liveapisec-report-{scan_id}.json"
-    with open(report_path, "w", encoding="utf-8") as fh:
-        fh.write(LiveAPISec.dump(report))
+    fmt = (getattr(args, "format", None) or "json").lower()
+    report_path = args.report_out
+    if report_path and report_path.endswith(".md"):
+        fmt = "md"
+    if fmt == "md":
+        findings = client.get_findings(args.site, scan_id)
+        comp = out.get("compliance")
+        md = _md_report(
+            {"scan_id": scan_id, **report},
+            findings,
+            verdict=verdict,
+            compliance=comp if isinstance(comp, dict) else None,
+        )
+        report_path = report_path or f"liveapisec-report-{scan_id}.md"
+        with open(report_path, "w", encoding="utf-8") as fh:
+            fh.write(md)
+    else:
+        report_path = report_path or f"liveapisec-report-{scan_id}.json"
+        with open(report_path, "w", encoding="utf-8") as fh:
+            fh.write(LiveAPISec.dump(report))
     if not args.json:
-        print(f"report saved: {report_path}")
+        print(f"report saved: {report_path} (format={fmt})")
 
     # 5. PDF certyfikatu (tylko gdy passed — inaczej 409 → notka)
     variant = args.variant or "full"
@@ -997,6 +1031,84 @@ def _cmd_all(client: LiveAPISec, args: argparse.Namespace) -> int:
     if verdict and verdict.get("verdict") != "pass":
         return 1
     return 0
+
+
+def _md_cell(text: Any) -> str:
+    """One Markdown table cell — no newlines/pipes breaking the table."""
+    return str(text or "—").replace("|", "\\|").replace("\n", "<br>")
+
+
+def _md_report(
+    scan: dict[str, Any],
+    findings: list[dict[str, Any]],
+    verdict: dict[str, Any] | None = None,
+    compliance: dict[str, Any] | None = None,
+) -> str:
+    """Human-readable Markdown report: scan summary + verdict + findings + compliance."""
+    summary = scan.get("summary") or {}
+    by_sev = summary.get("by_severity") or {}
+    lines = [
+        f"# LiveAPIsec security report — scan `{scan.get('scan_id') or scan.get('id')}`",
+        "",
+        f"- Status: **{scan.get('status', '?')}**",
+        f"- Tests run: **{summary.get('tests_run', '?')}**"
+        + (f" in {summary.get('duration_s')}s" if summary.get("duration_s") else ""),
+        f"- Findings: **{summary.get('findings', len(findings))}**"
+        + (
+            " (" + ", ".join(f"{k}={v}" for k, v in sorted(by_sev.items())) + ")"
+            if by_sev
+            else ""
+        ),
+    ]
+    if scan.get("branch") or scan.get("commit"):
+        lines.append(f"- Code: branch `{scan.get('branch')}` commit `{scan.get('commit')}`")
+    if verdict:
+        counts = verdict.get("counts") or {}
+        mark = "✅ PASS" if verdict.get("verdict") == "pass" else "❌ FAIL"
+        base = str(verdict.get("baseline_scan_id", ""))[:8]
+        lines += [
+            "",
+            "## Regression verdict vs baseline",
+            "",
+            (f"**{mark}** (fail-on: `{verdict.get('fail_on')}`, baseline `{base}…`)"
+             f" — new: **{counts.get('new', 0)}**, fixed: **{counts.get('fixed', 0)}**"
+             f", persisting: **{counts.get('persisting', 0)}**, "
+             f"blocking: **{counts.get('blocking', 0)}**"),
+        ]
+    lines += ["", "## Findings", ""]
+    if not findings:
+        lines.append("No findings — clean scan. 🎉")
+    else:
+        ordered = sorted(findings, key=lambda f: _SEV.index(str(f.get("severity", "info")).lower()) if str(f.get("severity", "info")).lower() in _SEV else 99)
+        lines += [
+            "| Severity | Title | Target | Category |",
+            "| --- | --- | --- | --- |",
+        ]
+        for f in ordered:
+            lines.append(
+                f"| {_md_cell(f.get('severity'))} | {_md_cell(f.get('title'))} | "
+                f"`{_md_cell(f.get('target'))}` | {_md_cell(f.get('category'))} |"
+            )
+    if compliance and not compliance.get("error"):
+        lines += ["", "## Compliance mapping (illustrative, not a certification)", ""]
+        frameworks = compliance.get("frameworks") or {}
+        for key in ("pci_dss", "soc2", "iso27001", "gdpr", "nis2"):
+            fw = frameworks.get(key) or {}
+            if not fw:
+                continue
+            failed = fw.get("failed", 0)
+            mark = "❌" if failed else "✅"
+            lines.append(
+                f"- {mark} **{fw.get('name', key)}**: {failed} failed / "
+                f"{fw.get('requirements_with_findings', 0)} requirements with findings"
+            )
+    lines += [
+        "",
+        "---",
+        ("_Generated by LiveAPIsec automated tests within the scanned scope — "
+         "not a full audit, no guarantee of security._"),
+    ]
+    return "\n".join(lines) + "\n"
 
 
 def _cmd_certificate(client: LiveAPISec, args: argparse.Namespace) -> int:
@@ -1293,7 +1405,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_report.add_argument("--site", required=True)
     p_report.add_argument("--scan", required=True)
     p_report.add_argument(
-        "-o", "--output", default=None, help="save to file (default: liveapisec-report-<scan>.json)"
+        "-o", "--output", default=None, help="save to file (default: liveapisec-report-<scan>.json|.md)"
+    )
+    p_report.add_argument(
+        "--format", choices=["json", "md"], default="json", help="report format (or use -o file.md)"
     )
     _json_flag(p_report)
     p_report.set_defaults(func=_cmd_report)
@@ -1311,7 +1426,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_all.add_argument("--env", default=None, help="environment name (required with --hacker)")
     p_all.add_argument("--goal", default=None, help="guided goal (with --hacker)")
     p_all.add_argument("--variant", choices=["full", "client"], default="full", help="certificate PDF variant")
-    p_all.add_argument("--report-out", default=None, help="report file (default: liveapisec-report-<scan>.json)")
+    p_all.add_argument("--report-out", default=None, help="report file (.json or .md)")
+    p_all.add_argument(
+        "--format", choices=["json", "md"], default="md",
+        help="report format for --report-out (default: md — full run report)",
+    )
     p_all.add_argument("--pdf-out", default=None, help="certificate PDF file")
     _json_flag(p_all)
     p_all.set_defaults(func=_cmd_all)
