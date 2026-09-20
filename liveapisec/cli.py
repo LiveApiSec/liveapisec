@@ -1293,6 +1293,9 @@ def _ask_counts_line(summary: dict[str, Any]) -> str:
         f"pass={counts.get('pass', 0)} fail={counts.get('fail', 0)} "
         f"na={counts.get('na', 0)} unanswered={counts.get('unanswered', 0)}"
     )
+    clar = summary.get("clarifications") or {}
+    if clar.get("total"):
+        line += f"  (clarifications: {clar.get('answered', 0)}/{clar['total']} answered)"
     by_sev = summary.get("failed_by_severity") or {}
     if by_sev:
         parts = [
@@ -1344,7 +1347,21 @@ def _cmd_ask_show(client: LiveAPISec, args: argparse.Namespace) -> int:
         return 0
     only = getattr(args, "only", None)
     print(_ask_counts_line(data))
+    clar = [q for q in data.get("questions") or [] if q.get("kind") == "clarification"]
+    if clar and only != "failed":
+        print("\n" + _bold("Clarifications (no priority — answers sharpen the next round):"))
+        for q in clar:
+            ans = q.get("answer") or {}
+            mark = _green("ANSWERED") if (ans.get("note") or ans.get("verdict")) else _dim("OPEN")
+            print(f"\n{mark} {q['qid']}")
+            print(f"  Q: {q.get('question')}")
+            if q.get("fix"):
+                print(f"  Why: {_dim(q['fix'])}")
+            if ans.get("note"):
+                print(f"  Answer: {ans['note']}")
     for q in data.get("questions") or []:
+        if q.get("kind") == "clarification":
+            continue  # już pokazane wyżej
         ans = q.get("answer") or {}
         verdict = ans.get("verdict", "unanswered")
         if only == "failed" and verdict != "fail":
@@ -1780,7 +1797,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_ask_ans = ask_sub.add_parser("answer", help="answer one question: pass | fail | na")
     p_ask_ans.add_argument("--session", required=True)
     p_ask_ans.add_argument("--question", required=True, help="e.g. SEC-ASK-5")
-    p_ask_ans.add_argument("--verdict", required=True, choices=["pass", "fail", "na"])
+    p_ask_ans.add_argument(
+        "--verdict",
+        required=True,
+        choices=["pass", "fail", "na", "info"],
+        help="info = answer to a clarification question (free text in --note)",
+    )
     p_ask_ans.add_argument("--note", default="", help="evidence: file/function checked")
     _json_flag(p_ask_ans)
     p_ask_ans.set_defaults(func=_cmd_ask_answer)

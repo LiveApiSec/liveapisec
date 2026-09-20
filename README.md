@@ -365,7 +365,9 @@ liveapisec report --site SITE_ID --scan SCAN_ID --json           # print to stdo
 Black-box tests stop at the HTTP boundary. `ask` opens a question session:
 270 checkable questions (SEC-ASK-1 … SEC-ASK-270: auth, RBAC, tenant
 isolation, crypto, business logic, SDLC…) plus AI-tailored extras about YOUR
-endpoints — roles, org layers, edge cases. You (or your LLM) answer
+endpoints. The first AI pass may also add **clarifications** (no priority) about
+your system — role names, tenant model, internal endpoints; answer them, then run
+`ask followup` and the next round turns those facts into precise questions — roles, org layers, edge cases. You (or your LLM) answer
 `pass` / `fail` / `na` by **reading the source code**, each with the fix and
 an evidence note. Every question carries a **priority** (critical/high/medium/low) — from the bank's category+pattern rules and, for AI questions, judged by the model; failures are sorted critical-first in the CLI, the panel and the Markdown report. Failures land in the Markdown report next to the findings:
 
@@ -374,6 +376,7 @@ liveapisec ask new --site SITE_ID                 # fresh session (270 + AI)
 liveapisec ask sessions --site SITE_ID            # pass/fail counts per session
 liveapisec ask answer --session SES --question SEC-ASK-5 --verdict fail --note "no MFA in auth.py"
 liveapisec ask run --session SES                  # interactive walkthrough
+liveapisec ask answer --session SES --question SEC-ASK-CL-1 --verdict info --note "roles: owner/admin/developer/viewer"   # answer a clarification
 liveapisec ask followup --session SES             # AI adds deeper questions from your answers
 liveapisec ask followup --session SES --rounds 3   # several AI passes (deduped)
 liveapisec ask followup --session SES --until-dry  # repeat until a pass adds nothing (cap 5)
