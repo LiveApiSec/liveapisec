@@ -1332,3 +1332,29 @@ def test_endpoints_from_spec_file_errors(tmp_path) -> None:
         _endpoints_from_spec_file(str(p))
     with pytest.raises(LiveAPISecError):
         _endpoints_from_spec_file(str(tmp_path / "missing.json"))
+
+
+def test_cli_ask_followup(capsys) -> None:
+    from liveapisec.cli import _cmd_ask_followup
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if "/followups" in request.url.path:
+            return httpx.Response(200, json={
+                "session_id": "sess1", "questions": 3, "added": 1,
+                "counts": {"pass": 1, "fail": 1, "na": 1, "unanswered": 0},
+                "failed": [],
+            })
+        return httpx.Response(404, json={})
+
+    class Args:
+        session = "sess1"; json = False
+
+    assert _cmd_ask_followup(_client(handler), Args()) == 0
+    assert "follow-up questions added: 1" in capsys.readouterr().out
+
+
+def test_cli_ask_followup_parser() -> None:
+    from liveapisec.cli import build_parser
+
+    args = build_parser().parse_args(["ask", "followup", "--session", "s"])
+    assert args.ask_command == "followup"

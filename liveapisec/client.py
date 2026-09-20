@@ -327,6 +327,12 @@ class LiveAPISec:
             json={"qid": qid, "verdict": verdict, "note": note},
         )
 
+    def ask_followups(self, session_id: str) -> dict[str, Any]:
+        """Ask the LLM for extra questions based on the answers given so far."""
+        return self._request(
+            "POST", f"/developers/ask-sessions/{session_id}/followups"
+        )
+
     # -- CI helpers ------------------------------------------------------------
     def wait_for_scan(
         self,

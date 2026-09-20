@@ -374,6 +374,7 @@ liveapisec ask new --site SITE_ID                 # fresh session (200 + AI)
 liveapisec ask sessions --site SITE_ID            # pass/fail counts per session
 liveapisec ask answer --session SES --question SEC-ASK-5 --verdict fail --note "no MFA in auth.py"
 liveapisec ask run --session SES                  # interactive walkthrough
+liveapisec ask followup --session SES             # AI adds deeper questions from your answers
 liveapisec ask show --session SES --only failed   # review failures
 ```
 

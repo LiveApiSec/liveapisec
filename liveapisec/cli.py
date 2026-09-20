@@ -1337,6 +1337,19 @@ def _cmd_ask_answer(client: LiveAPISec, args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_ask_followup(client: LiveAPISec, args: argparse.Namespace) -> int:
+    out = client.ask_followups(args.session)
+    if args.json:
+        print(LiveAPISec.dump(out))
+        return 0
+    added = out.get("added", 0)
+    print(f"follow-up questions added: {added}")
+    print(_ask_counts_line(out))
+    if added:
+        print(_dim("answer them with: liveapisec ask run --session " + args.session))
+    return 0
+
+
 def _cmd_ask_run(client: LiveAPISec, args: argparse.Namespace) -> int:
     """Interactive ask-mode: walk unanswered questions, record pass/fail/na."""
     data = client.get_ask_session(args.session)
@@ -1733,6 +1746,13 @@ def build_parser() -> argparse.ArgumentParser:
     p_ask_run = ask_sub.add_parser("run", help="interactive: walk unanswered questions")
     p_ask_run.add_argument("--session", required=True)
     p_ask_run.set_defaults(func=_cmd_ask_run)
+
+    p_ask_fu = ask_sub.add_parser(
+        "followup", help="AI adds questions based on the answers you gave"
+    )
+    p_ask_fu.add_argument("--session", required=True)
+    _json_flag(p_ask_fu)
+    p_ask_fu.set_defaults(func=_cmd_ask_followup)
 
     p_sites = sub.add_parser("sites", help="show a site")
     p_sites.add_argument("--site", required=True)
