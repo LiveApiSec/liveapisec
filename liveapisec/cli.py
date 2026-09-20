@@ -1161,11 +1161,16 @@ def _md_ask_section(ask_summary: dict[str, Any] | None) -> list[str]:
          f"na: {counts.get('na', 0)}, unanswered: {counts.get('unanswered', 0)}"),
     ]
     if failed:
-        lines += ["", "| ID | Category | Question | Developer note|", "| --- | --- | --- | --- |"]
+        lines += [
+            "",
+            "| Severity | ID | Category | Question | Developer note |",
+            "| --- | --- | --- | --- | --- |",
+        ]
         for f in failed[:30]:
             lines.append(
-                f"| {f.get('qid')} | {_md_cell(f.get('category'))} | "
-                f"{_md_cell(f.get('question'))} | {_md_cell(f.get('note'))} |"
+                f"| **{(f.get('severity') or 'medium').upper()}** | {f.get('qid')} | "
+                f"{_md_cell(f.get('category'))} | {_md_cell(f.get('question'))} | "
+                f"{_md_cell(f.get('note'))} |"
             )
         if len(failed) > 30:
             lines.append(f"_…and {len(failed) - 30} more failed questions (see ask session)._")
@@ -1262,16 +1267,42 @@ def _md_report(
     return "\n".join(lines) + "\n"
 
 
+_SEV_ORDER = ("critical", "high", "medium", "low")
+
+
+def _sev_label(sev: str) -> str:
+    """Kolorowa etykieta priorytetu (critical/high/medium/low)."""
+    sev = (sev or "medium").lower()
+    text = f"[{sev.upper()}]"
+    if sev == "critical":
+        return _red(text)
+    if sev == "high":
+        return _yellow(text)
+    if sev == "low":
+        return _dim(text)
+    return text
+
+
 def _ask_counts_line(summary: dict[str, Any]) -> str:
     counts = summary.get("counts") or {}
     total = summary.get("questions", 0)
     if isinstance(total, list):  # endpoint szczegółów zwraca listę pytań
         total = len(total)
-    return (
+    line = (
         f"session {summary.get('session_id', '')[:8]}…: {total} questions — "
         f"pass={counts.get('pass', 0)} fail={counts.get('fail', 0)} "
         f"na={counts.get('na', 0)} unanswered={counts.get('unanswered', 0)}"
     )
+    by_sev = summary.get("failed_by_severity") or {}
+    if by_sev:
+        parts = [
+            f"{sev}={by_sev[sev]}"
+            for sev in ("critical", "high", "medium", "low")
+            if by_sev.get(sev)
+        ]
+        if parts:
+            line += f"  (fails: {', '.join(parts)})"
+    return line
 
 
 def _cmd_ask_new(client: LiveAPISec, args: argparse.Namespace) -> int:
@@ -1301,7 +1332,8 @@ def _cmd_ask_sessions(client: LiveAPISec, args: argparse.Namespace) -> int:
     for s in sessions:
         print(_ask_counts_line(s))
         for f in (s.get("failed") or [])[:5]:
-            print(f"  {_red('FAIL')} {f['qid']} [{f.get('category')}] {f.get('question', '')[:90]}")
+            sev = _sev_label(f.get("severity") or "medium")
+            print(f"  {_red('FAIL')} {sev} {f['qid']} [{f.get('category')}] {f.get('question', '')[:80]}")
     return 0
 
 
@@ -1320,7 +1352,11 @@ def _cmd_ask_show(client: LiveAPISec, args: argparse.Namespace) -> int:
         if only == "unanswered" and verdict != "unanswered":
             continue
         mark = {"pass": _green("PASS"), "fail": _red("FAIL")}.get(verdict, _dim(verdict.upper()))
-        print(f"\n{mark} {q['qid']} [{q.get('category')}]" + (" (AI)" if q.get("ai") else ""))
+        sev = q.get("severity") or "medium"
+        print(
+            f"\n{mark} {q['qid']} [{q.get('category')}] {_sev_label(sev)}"
+            + (" (AI)" if q.get("ai") else "")
+        )
         print(f"  Q: {q.get('question')}")
         print(f"  Fix: {_dim(q.get('fix', ''))}")
         if ans.get("note"):

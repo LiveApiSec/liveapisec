@@ -367,7 +367,7 @@ Black-box tests stop at the HTTP boundary. `ask` opens a question session:
 isolation, crypto, business logic, SDLC…) plus AI-tailored extras about YOUR
 endpoints — roles, org layers, edge cases. You (or your LLM) answer
 `pass` / `fail` / `na` by **reading the source code**, each with the fix and
-an evidence note. Failures land in the Markdown report next to the findings:
+an evidence note. Every question carries a **priority** (critical/high/medium/low) — from the bank's category+pattern rules and, for AI questions, judged by the model; failures are sorted critical-first in the CLI, the panel and the Markdown report. Failures land in the Markdown report next to the findings:
 
 ```bash
 liveapisec ask new --site SITE_ID                 # fresh session (270 + AI)
