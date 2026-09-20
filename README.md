@@ -472,16 +472,33 @@ jobs:
         with: { python-version: "3.12" }
       - name: Install CLI
         run: pip install "liveapisec @ git+https://github.com/LiveApiSec/liveapisec.git"
-      - name: Push API + run security test (gate on high)
+      - name: Full pipeline — scan, regression gate, report, certificate
+        id: sectest
         env:
           LIVEAPISEC_API_KEY: ${{ secrets.LIVEAPISEC_KEY }}
         run: |
           liveapisec push --name my-api --base-url "$BASE_URL" \
             --endpoint "GET /users" --endpoint "POST /payments"
-          liveapisec scan --site "$SITE_ID" \
-            --branch "${GITHUB_REF#refs/heads/}" --commit "$GITHUB_SHA" \
-            --wait --fail-on high
+          liveapisec all --site "$SITE_ID" --fail-on high \
+            --format md --report-out security-report.md
+      - name: Upload security report + certificate
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: liveapisec-report
+          path: |
+            security-report.md
+            liveapisec-certificate-*.pdf
 ```
+
+**How a failure shows up in CI:** `all` exits **1** when NEW findings reach
+`--fail-on` (compared against the baseline = previous completed scan), so the
+`Full pipeline` step turns red and the workflow fails — exactly like a failing
+test suite. The Markdown report (`security-report.md`) is attached as an
+artifact either way (`if: always()`), so reviewers see which findings are new:
+open the run → *Artifacts* → `liveapisec-report`. The same exit-code contract
+works in GitLab CI, Jenkins or plain bash (`set -e` stops the pipeline on
+regressions). For agents/AI parsing, use `--json` on `verdict`/`scan` instead.
 
 > **Why is push safe?** Push is idempotent (name+base_url → the same site), so
 > the next build does not create junk — it updates endpoints and the token, and
@@ -493,9 +510,9 @@ jobs:
 
 | Code | Meaning |
 |------|---------|
-| 0    | OK (no findings at/above the threshold, or no `--fail-on`) |
-| 1    | Gate failed — findings found at/above `--fail-on` |
-| 2    | Usage error / API error / missing key |
+| 0    | OK (`verdict: pass` — no NEW findings at/above the threshold) |
+| 1    | Gate failed — NEW findings at/above `--fail-on` vs baseline (`verdict`/`all`) |
+| 2    | Usage error / API error / scan did not complete |
 
 ---
 
