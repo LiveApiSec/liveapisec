@@ -1718,7 +1718,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     ask_sub = p_ask.add_subparsers(dest="ask_command", required=True)
 
-    p_ask_new = ask_sub.add_parser("new", help="new question session for a site (bank 224 + AI)")
+    p_ask_new = ask_sub.add_parser("new", help="new question session for a site (bank 240 + AI)")
     p_ask_new.add_argument("--site", required=True)
     p_ask_new.add_argument("--no-ai", action="store_true", help="bank only, no AI questions")
     _json_flag(p_ask_new)
