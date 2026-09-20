@@ -363,14 +363,14 @@ liveapisec report --site SITE_ID --scan SCAN_ID --json           # print to stdo
 ### 10. `ask` — answer what the scanner cannot see (SEC-ASK-N)
 
 Black-box tests stop at the HTTP boundary. `ask` opens a question session:
-200 checkable questions (SEC-ASK-1 … SEC-ASK-200: auth, RBAC, tenant
+224 checkable questions (SEC-ASK-1 … SEC-ASK-224: auth, RBAC, tenant
 isolation, crypto, business logic, SDLC…) plus AI-tailored extras about YOUR
 endpoints — roles, org layers, edge cases. You (or your LLM) answer
 `pass` / `fail` / `na` by **reading the source code**, each with the fix and
 an evidence note. Failures land in the Markdown report next to the findings:
 
 ```bash
-liveapisec ask new --site SITE_ID                 # fresh session (200 + AI)
+liveapisec ask new --site SITE_ID                 # fresh session (224 + AI)
 liveapisec ask sessions --site SITE_ID            # pass/fail counts per session
 liveapisec ask answer --session SES --question SEC-ASK-5 --verdict fail --note "no MFA in auth.py"
 liveapisec ask run --session SES                  # interactive walkthrough
