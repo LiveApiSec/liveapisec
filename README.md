@@ -24,10 +24,10 @@ endpoints.
 1. **`push`** — list endpoints yourself (works for **any** HTTP API).
 2. **`push --openapi-url …`** — pull an OpenAPI spec (FastAPI/DRF, Springdoc,
    NestJS Swagger, express swagger-ui, ASP.NET Swashbuckle…).
-3. **`push-code`** — scan the source code; it auto-detects these
+3. **`scan-code`** — scan the source code; it auto-detects these
    **11 frameworks**:
 
-| Language | Frameworks recognized by `push-code` |
+| Language | Frameworks recognized by `scan-code` |
 |----------|---------------------------------------|
 | Python   | FastAPI · Flask · Django              |
 | JS/TS    | Next.js (App + Pages Router) · NestJS · Express |
@@ -38,7 +38,7 @@ endpoints.
 
 **What kind of applications work?** REST/JSON APIs — microservices, monoliths,
 BFFs, API gateways, third-party APIs… public or protected (jwt / bearer /
-cookie / api_key / OAuth2). `push-code` reads the HTTP routes; the app behind
+cookie / api_key / OAuth2). `scan-code` reads the HTTP routes; the app behind
 them can be anything.
 
 **API types we can test:** REST (OpenAPI / Swagger), **RAML**, **GraphQL**
@@ -135,7 +135,7 @@ liveapisec config --clear  # remove the saved config file
 
 ### Interactive mode (project + site picker)
 
-When you run `push` / `push-code` in a terminal and **omit `--project`** (or
+When you run `push` / `scan-code` in a terminal and **omit `--project`** (or
 `--site`), the CLI shows the projects available for your API key and lets you
 pick one — or create a new one. After picking a project you can pick an existing
 site/URL inside it, or add a new URL:
@@ -217,14 +217,17 @@ site 65f...abc: my-api — 2 endpoints, auth=none
 export SITE_ID=65f...abc
 ```
 
-### 2. `push-code` — scan your source code and push the endpoints
+### 2. `scan-code` — scan your source code and push the endpoints
 
 Point the CLI at a repo/folder and it detects the framework, extracts the API
 endpoints from the code and pushes them — no running site or OpenAPI spec needed.
+**The scan runs 100% locally: your code never leaves the machine.** Only the
+extracted endpoint list (`METHOD + path`) is sent to the API. (The old name
+`push-code` still works as an alias.)
 
 ```bash
 cd my-project
-liveapisec push-code --dir . --name my-api --base-url https://api.example.com
+liveapisec scan-code --dir . --name my-api --base-url https://api.example.com
 ```
 
 - Auto-detected frameworks: **FastAPI**, **Flask**, **Django**, **Next.js**
@@ -236,15 +239,15 @@ liveapisec push-code --dir . --name my-api --base-url https://api.example.com
   it is shallow-cloned to a temp dir and cleaned up afterwards:
 
 ```bash
-liveapisec push-code --repo git@github.com:acme/my-api.git \
+liveapisec scan-code --repo git@github.com:acme/my-api.git \
   --name my-api --base-url https://api.example.com
 ```
 
 - Preview before pushing (no API key needed):
 
 ```bash
-liveapisec push-code --dir . --name my-api --base-url https://api.example.com --dry-run
-liveapisec push-code --dir . --name my-api --base-url https://api.example.com --dry-run --json
+liveapisec scan-code --dir . --name my-api --base-url https://api.example.com --dry-run
+liveapisec scan-code --dir . --name my-api --base-url https://api.example.com --dry-run --json
 ```
 
 - Force a framework if auto-detection misses it: `--framework nextjs`.
@@ -572,7 +575,7 @@ Windsurf…) to let it use the LiveAPISec CLI on your behalf.
 You can use the `liveapisec` CLI (https://pypi.org/project/liveapisec/) to
 push API specifications, run security scans and read results against the
 LiveAPISec platform. It works with APIs in ANY language/framework (not just
-Python) — use `push-code` to extract endpoints from source, or
+Python) — use `scan-code` to extract endpoints from source, or
 `push --openapi-url` for an OpenAPI spec.
 
 Environment:
@@ -589,7 +592,7 @@ Fetch information about the portal (to diagnose and fix issues):
 
 Language note: the CLI is written in Python, but it tests APIs built in ANY
 language/framework — Python, Node.js, Go, Rust, Java, PHP, Ruby, .NET, etc.
-Use `liveapisec push-code` to auto-extract endpoints from the source
+Use `liveapisec scan-code` to auto-extract endpoints from the source
 (FastAPI, Flask, Django, Next.js, NestJS, Express, Laravel, PHP/Slim, Spring,
 Go, Rust), or `push --openapi-url` for any API that exposes an OpenAPI spec.
 

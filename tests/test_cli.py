@@ -1163,3 +1163,14 @@ def test_cli_all_md_report_with_verdict(tmp_path, capsys) -> None:
     text = (tmp_path / "run.md").read_text()
     assert "Regression verdict vs baseline" in text
     assert "report saved" in capsys.readouterr().out
+
+
+# --- scan-code (renamed from push-code; old name stays as alias) --------------
+
+def test_scan_code_alias_parses_to_same_command() -> None:
+    from liveapisec.cli import _cmd_scan_code, build_parser
+
+    for name in ("scan-code", "push-code"):
+        args = build_parser().parse_args([name, "--dir", ".", "--dry-run"])
+        assert args.func is _cmd_scan_code
+        assert _cmd_scan_code.__name__ == '_cmd_scan_code'
