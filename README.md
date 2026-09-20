@@ -297,6 +297,10 @@ liveapisec hacker --site SITE_ID --env staging --wait
 # guided mode — give the agent a specific objective (TODO 3.6.2)
 liveapisec hacker --site SITE_ID --env development \
   --goal "check /users for IDOR — your record vs another user's"
+
+# localhost / internal target — through a connected CLI tunnel (terminal 1:
+# `liveapisec connect --site SITE_ID`, keep running)
+liveapisec hacker --site SITE_ID --env development --wait --tunnel
 ```
 
 - `--env` — environment name defined on the site (e.g. `development`, `staging`).
@@ -393,6 +397,9 @@ liveapisec connect --site SITE_ID
 
 # terminal 2 — route the scan through the CLI
 liveapisec scan --site SITE_ID --wait --tunnel
+
+# hacker-mode works through the tunnel too (dev/staging only)
+liveapisec hacker --site SITE_ID --env development --wait --tunnel
 ```
 
 Only the site's `base_url` host is forwarded (not an open proxy).

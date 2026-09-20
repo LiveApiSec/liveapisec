@@ -733,7 +733,9 @@ def _cmd_hacker(client: LiveAPISec, args: argparse.Namespace) -> int:
             "error: --env (environment name, e.g. development) is required", file=sys.stderr
         )
         return 2
-    scan = client.trigger_hacker_scan(args.site, args.env, goal=args.goal)
+    scan = client.trigger_hacker_scan(
+        args.site, args.env, goal=args.goal, tunnel=getattr(args, "tunnel", False)
+    )
     scan_id = scan["scan_id"]
     if args.json:
         print(LiveAPISec.dump(scan))
@@ -1050,6 +1052,11 @@ def build_parser() -> argparse.ArgumentParser:
         "(TODO 3.6.2)",
     )
     p_hacker.add_argument("--wait", action="store_true", help="poll until the agent finishes")
+    p_hacker.add_argument(
+        "--tunnel",
+        action="store_true",
+        help="run through a connected CLI tunnel (localhost/internal targets)",
+    )
     p_hacker.add_argument("--poll-interval", type=float, default=3.0)
     p_hacker.add_argument("--timeout", type=float, default=600.0)
     _json_flag(p_hacker)
