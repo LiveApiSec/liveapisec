@@ -1218,6 +1218,8 @@ def _md_report(
 def _ask_counts_line(summary: dict[str, Any]) -> str:
     counts = summary.get("counts") or {}
     total = summary.get("questions", 0)
+    if isinstance(total, list):  # endpoint szczegółów zwraca listę pytań
+        total = len(total)
     return (
         f"session {summary.get('session_id', '')[:8]}…: {total} questions — "
         f"pass={counts.get('pass', 0)} fail={counts.get('fail', 0)} "

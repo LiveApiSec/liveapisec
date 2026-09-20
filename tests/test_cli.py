@@ -1272,6 +1272,17 @@ def test_cli_ask_sessions(capsys) -> None:
     assert "fail=1" in out and "SEC-ASK-1" in out
 
 
+def test_cli_ask_counts_line_with_question_list() -> None:
+    from liveapisec.cli import _ask_counts_line
+
+    line = _ask_counts_line({
+        "session_id": "sess1",
+        "questions": [{"qid": "SEC-ASK-1"}, {"qid": "SEC-ASK-2"}],
+        "counts": {"pass": 1, "fail": 0, "na": 1, "unanswered": 0},
+    })
+    assert "2 questions" in line and "pass=1" in line
+
+
 def test_cli_ask_answer(capsys) -> None:
     from liveapisec.cli import _cmd_ask_answer
 
