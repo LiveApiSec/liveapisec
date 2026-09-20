@@ -243,6 +243,57 @@ class LiveAPISec:
     def get_findings(self, site_id: str, scan_id: str) -> list[dict[str, Any]]:
         return self._request("GET", f"/developers/sites/{site_id}/scans/{scan_id}/findings")
 
+    def get_verdict(
+        self, site_id: str, scan_id: str, baseline_scan_id: str, fail_on: str = "high"
+    ) -> dict[str, Any]:
+        """CI verdict: new/fixed/persisting findings vs baseline + pass/fail."""
+        return self._request(
+            "GET",
+            f"/developers/sites/{site_id}/scans/{scan_id}/verdict",
+            params={"baseline_scan_id": baseline_scan_id, "fail_on": fail_on},
+        )
+
+    def get_compliance(self, site_id: str, scan_id: str) -> dict[str, Any]:
+        """Compliance mapping (PCI DSS / SOC 2 / ISO 27001 / GDPR / NIS2, Pro+)."""
+        return self._request(
+            "GET", f"/developers/sites/{site_id}/scans/{scan_id}/compliance"
+        )
+
+    def get_report(self, site_id: str, scan_id: str) -> dict[str, Any]:
+        """Full saved scan report (raw results + summary)."""
+        return self._request(
+            "GET", f"/developers/sites/{site_id}/scans/{scan_id}/report"
+        )
+
+    def download_certificate_pdf(
+        self, site_id: str, scan_id: str, variant: str = "full"
+    ) -> tuple[bytes, str]:
+        """Certificate PDF (only when the scan passed). Returns (bytes, filename)."""
+        import httpx
+
+        url = (
+            f"{self.api_url}/developers/sites/{site_id}/scans/{scan_id}/"
+            f"certificate.pdf?variant={variant}"
+        )
+        try:
+            with httpx.Client(transport=self._transport) as client:
+                resp = client.get(url, headers=self._headers(), timeout=self.timeout)
+        except httpx.HTTPError as exc:
+            raise LiveAPISecError(None, "Connection error", str(exc)) from exc
+        if resp.status_code >= 400:
+            try:
+                body = resp.json()
+                title = body.get("title", "Error")
+                detail = body.get("detail", resp.text[:300])
+            except Exception:  # noqa: BLE001
+                title, detail = "Error", resp.text[:300]
+            raise LiveAPISecError(resp.status_code, title, detail)
+        filename = f"liveapisec-certificate-{variant}-{scan_id}.pdf"
+        disp = resp.headers.get("content-disposition", "")
+        if 'filename="' in disp:
+            filename = disp.split('filename="', 1)[1].split('"', 1)[0] or filename
+        return resp.content, filename
+
     # -- CI helpers ------------------------------------------------------------
     def wait_for_scan(
         self,
