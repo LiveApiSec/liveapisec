@@ -366,6 +366,47 @@ def _fmt_finding(f: dict[str, Any]) -> str:
     return line
 
 
+def _endpoints_from_spec_file(path: str) -> list[dict[str, str]]:
+    """Parsuj lokalny OpenAPI (JSON/YAML) na listę {method, path}.
+
+    Serwer nie pobiera niczego (brak SSRF) — wysyłamy gotowe endpointy.
+    """
+    import json
+
+    try:
+        with open(path, encoding="utf-8") as fh:
+            text = fh.read()
+    except OSError as exc:
+        raise LiveAPISecError("Spec file error", f"cannot read {path}: {exc}") from exc
+    try:
+        spec = json.loads(text)
+    except ValueError:
+        try:
+            import yaml  # type: ignore[import-not-found]
+        except ImportError as exc:
+            raise LiveAPISecError(
+                "Spec file error",
+                f"{path} is not JSON — install pyyaml for YAML specs",
+            ) from exc
+        try:
+            spec = yaml.safe_load(text)
+        except Exception as exc:
+            raise LiveAPISecError("Spec file error", f"cannot parse {path}: {exc}") from exc
+    if not isinstance(spec, dict) or not isinstance(spec.get("paths"), dict):
+        raise LiveAPISecError("Spec file error", f"{path} has no OpenAPI 'paths' object")
+    methods = ("GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS")
+    out = []
+    for route, ops in spec["paths"].items():
+        if not isinstance(ops, dict):
+            continue
+        for method in ops:
+            if str(method).upper() in methods:
+                out.append(_parse_endpoint(f"{str(method).upper()} {route}"))
+    if not out:
+        raise LiveAPISecError("Spec file error", f"no operations found in {path}")
+    return out
+
+
 def _cmd_push(client: LiveAPISec, args: argparse.Namespace) -> int:
     interactive = sys.stdin.isatty() and not args.json and not args.verify
     sites: list[dict[str, Any]] = []
@@ -406,8 +447,14 @@ def _cmd_push(client: LiveAPISec, args: argparse.Namespace) -> int:
     if not site_base and not site_id:
         print("error: --base-url is required", file=sys.stderr)
         return 2
+    if getattr(args, "spec_file", None):
+        try:
+            args.endpoint = list(args.endpoint or []) + _endpoints_from_spec_file(args.spec_file)
+        except LiveAPISecError as exc:
+            print(f"error: {exc.title}: {exc.detail}", file=sys.stderr)
+            return 2
     if not args.endpoint and not args.openapi_url:
-        print("error: provide at least one --endpoint or --openapi-url", file=sys.stderr)
+        print("error: provide at least one --endpoint, --spec-file or --openapi-url", file=sys.stderr)
         return 2
     auth = _build_auth(args)
     err = _validate_auth(args, auth)
@@ -1469,6 +1516,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--endpoint", action="append", type=_parse_endpoint, help="'METHOD /path' (repeatable)"
     )
     p_push.add_argument("--openapi-url", help="URL to OpenAPI spec instead of --endpoint")
+    p_push.add_argument(
+        "--spec-file",
+        help="local OpenAPI file (JSON/YAML) — parsed locally, server fetches nothing (no SSRF block)",
+    )
     p_push.add_argument("--site", help="existing site_id to update (PUT)")
     p_push.add_argument(
         "--verify",

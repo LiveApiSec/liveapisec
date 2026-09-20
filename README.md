@@ -172,6 +172,7 @@ liveapisec push \
 - The same `name` + `base_url` = **the same site** (update, not a duplicate) —
   you can call push in every build.
 - Instead of a list of endpoints you can provide an OpenAPI spec: `--openapi-url https://api.example.com/openapi.json`.
+- Local spec file (no server-side fetch, works with localhost/private URLs that `--openapi-url` blocks): `--spec-file ./openapi.json` (JSON/YAML, parsed locally).
 - Optional token: `--auth-type jwt --auth-token <TOKEN>` (or `bearer`,
   `cookie --auth-cookie "session=..."`, `api_key --auth-header X-API-Key`).
 - Per-URL automation: `--schedule 6h|12h|24h|weekly` (capped by your plan) and
