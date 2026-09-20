@@ -1301,3 +1301,34 @@ def test_cli_ask_parser() -> None:
          "--verdict", "fail", "--note", "x"]
     )
     assert args.ask_command == "answer" and args.verdict == "fail"
+
+
+def test_endpoints_from_spec_file_json(tmp_path) -> None:
+    import json
+
+    from liveapisec.cli import _endpoints_from_spec_file
+
+    spec = {"openapi": "3.0.0", "paths": {
+        "/users": {"get": {}, "post": {}},
+        "/admin": {"delete": {}, "trace": {}},
+    }}
+    p = tmp_path / "api.json"
+    p.write_text(json.dumps(spec))
+    assert _endpoints_from_spec_file(str(p)) == [
+        {"method": "GET", "path": "/users"},
+        {"method": "POST", "path": "/users"},
+        {"method": "DELETE", "path": "/admin"},
+    ]
+
+
+def test_endpoints_from_spec_file_errors(tmp_path) -> None:
+    import pytest
+
+    from liveapisec.cli import LiveAPISecError, _endpoints_from_spec_file
+
+    p = tmp_path / "bad.json"
+    p.write_text('{"info": {}}')
+    with pytest.raises(LiveAPISecError):
+        _endpoints_from_spec_file(str(p))
+    with pytest.raises(LiveAPISecError):
+        _endpoints_from_spec_file(str(tmp_path / "missing.json"))
