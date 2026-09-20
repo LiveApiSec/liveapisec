@@ -811,6 +811,18 @@ def test_trigger_scan_tunnel_flag() -> None:
     assert captured["body"] == {"tunnel": True}
 
 
+def test_trigger_hacker_scan_tunnel_flag() -> None:
+    """Hacker-mode przez tunel CLI (localhost/internal) — flaga w payloadzie."""
+    captured: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = json.loads(request.content)
+        return httpx.Response(202, json={"scan_id": "hack-t", "status": "queued"})
+
+    _client(handler).trigger_hacker_scan("site1", "development", tunnel=True)
+    assert captured["body"] == {"environment": "development", "tunnel": True}
+
+
 def test_cmd_connect_forwards_one_request(monkeypatch, capsys) -> None:
     import base64
     from typing import ClassVar

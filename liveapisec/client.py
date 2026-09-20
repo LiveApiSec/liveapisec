@@ -208,17 +208,22 @@ class LiveAPISec:
 
     # -- hacker mode (TODO 3.6 / 3.6.1) --------------------------------------
     def trigger_hacker_scan(
-        self, site_id: str, environment: str, goal: str | None = None
+        self, site_id: str, environment: str, goal: str | None = None,
+        tunnel: bool = False,
     ) -> dict[str, Any]:
         """Trigger an autonomous AI hacker-mode test (202) on a dev/staging env.
 
         Requires a verified domain for public targets; localhost / private IPs are
         exempt. Never runs on production. `goal` is an optional guided attack
-        objective (TODO 3.6.2). Returns {scan_id, status, environment}.
+        objective (TODO 3.6.2). `tunnel=True` routes requests through a connected
+        CLI (reverse tunnel) — for localhost/internal targets. Returns
+        {scan_id, status, environment}.
         """
         payload: dict[str, Any] = {"environment": environment}
         if goal:
             payload["goal"] = goal
+        if tunnel:
+            payload["tunnel"] = True
         return self._request(
             "POST",
             f"/developers/sites/{site_id}/hacker-scans",
