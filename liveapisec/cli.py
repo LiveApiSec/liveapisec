@@ -688,12 +688,14 @@ def _cmd_scan(client: LiveAPISec, args: argparse.Namespace) -> int:
         commit=args.commit,
         tunnel=getattr(args, "tunnel", False),
         auth_b=_auth_b_payload(args),
+        environment=getattr(args, "url", None),
     )
     scan_id = scan["scan_id"]
     if args.json:
         print(LiveAPISec.dump(scan))
     else:
-        print(f"scan queued: {scan_id}")
+        target = getattr(args, "url", None)
+        print(f"scan queued: {scan_id}" + (f" (url={target})" if target else ""))
     if not args.json and getattr(args, "auth_token_b", None):
         print(_dim("auth-matrix RBAC test enabled (second identity)"))
     if not args.wait:
@@ -1443,6 +1445,23 @@ def _cmd_ask_run(client: LiveAPISec, args: argparse.Namespace) -> int:
 
 def _cmd_certificate(client: LiveAPISec, args: argparse.Namespace) -> int:
     """Certyfikat / Trust Page w wybranym zakresie: publiczny URL + snippet."""
+    # TODO 2.50 (opcja 3): wybór URL-a, którego dotyczy PUBLICZNY certyfikat.
+    cert_url = getattr(args, "url", None)
+    if cert_url is not None and not args.site:
+        print("error: --url needs --site", file=sys.stderr)
+        return 2
+    if args.site and cert_url is not None:
+        try:
+            client.set_site_certificate_url(args.site, cert_url or None)
+            print(
+                _green(
+                    f"{_OK} public certificate now concerns URL: "
+                    f"{cert_url or 'default base_url'}"
+                )
+            )
+        except Exception as exc:  # noqa: BLE001 — zły URL/uprawnienia
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
     if getattr(args, "pdf", False):
         # PDF z konkretnego skanu (tylko gdy passed) — zapis do pliku.
         if not args.site or not args.scan:
@@ -1475,8 +1494,12 @@ def _cmd_certificate(client: LiveAPISec, args: argparse.Namespace) -> int:
     embeds = data.get("embeds") or {}
     snippet = embeds.get(wtype) or embeds.get("badge") or ""
     print()
-    print(f"Embed ({wtype}) — paste into your site/docs:")
+    print(f"Embed ({wtype}) — install the widget in 3 steps:")
+    print("  1. Paste the snippet into your site (footer/docs/trust page):")
     print(snippet)
+    print("  2. The badge appears automatically once the site passes its tests")
+    print("     (failed/no_data shows nothing — by design).")
+    print(f"  3. Verify: open {data.get('trust_url') or 'the trust URL above'}")
     print()
     print(_dim("Other types: " + ", ".join(embeds.keys())))
     return 0
@@ -1549,6 +1572,166 @@ def _cmd_sites(client: LiveAPISec, args: argparse.Namespace) -> int:
         f"  access: {site.get('access') or 'external'}  "
         f"schedule: {site.get('schedule') or 'off'}"
     )
+    # TODO 2.50: URL-e — ten sam zestaw endpointów testowany przeciw każdemu.
+    envs = site.get("environments") or []
+    if envs:
+        print("  urls (same endpoints tested against each):")
+        for e in envs:
+            flags = []
+            ver = e.get("version") or "latest"
+            if ver and ver != "latest":
+                flags.append(f"version={ver}")
+            if e.get("schedule") and e.get("schedule") != "off":
+                flags.append(f"schedule={e['schedule']}")
+            if e.get("paused"):
+                flags.append("paused")
+            suffix = f"  [{', '.join(flags)}]" if flags else ""
+            print(f"    - {e.get('name')}: {e.get('base_url')}{suffix}")
+        print(f"    run one: liveapisec scan --site {args.site} --url <name>")
+    return 0
+
+
+def _cmd_urls(client: LiveAPISec, args: argparse.Namespace) -> int:
+    """Zarządzanie URL-ami site'u (TODO 2.50): list / add / set / rm.
+
+    Jeden zestaw endpointów, wiele adresów. Każdy URL ma własną wersję spec
+    (`latest` albo snapshot), harmonogram i stan `paused`.
+    """
+    if not args.site:
+        print("error: --site (site_id) is required", file=sys.stderr)
+        return 2
+    action = getattr(args, "action", "list") or "list"
+
+    if action == "list":
+        envs = client.list_environments(args.site)
+        if args.json:
+            print(LiveAPISec.dump(envs))
+            return 0
+        if not envs:
+            print(_dim("no URLs yet — add one: liveapisec urls add --site ID --name dev --url URL"))
+            return 0
+        for e in envs:
+            flags = []
+            ver = e.get("version") or "latest"
+            flags.append(f"version={ver}")
+            if e.get("schedule") and e.get("schedule") != "off":
+                flags.append(f"schedule={e['schedule']}")
+            if e.get("paused"):
+                flags.append("paused")
+            print(f"  - {e.get('name')}: {e.get('base_url')}  [{', '.join(flags)}]")
+        return 0
+
+    if action == "add":
+        if not args.name or not args.base_url:
+            print("error: urls add needs --name and --url", file=sys.stderr)
+            return 2
+        try:
+            env = client.add_environment(
+                args.site,
+                args.name,
+                args.base_url,
+                version=args.version or "latest",
+                schedule=args.schedule,
+            )
+        except Exception as exc:  # noqa: BLE001
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
+        print(_green(f"{_OK} added URL '{env.get('name')}' → {env.get('base_url')}"))
+        return 0
+
+    if action == "set":
+        if not args.name:
+            print("error: urls set needs --name", file=sys.stderr)
+            return 2
+        fields = {
+            "base_url": args.base_url,
+            "version": args.version,
+            "schedule": args.schedule,
+            "paused": True if args.paused else None,
+        }
+        if all(v is None for v in fields.values()):
+            print(
+                "error: urls set needs at least one of --url / --version / --schedule / --paused",
+                file=sys.stderr,
+            )
+            return 2
+        try:
+            env = client.update_environment(args.site, args.name, **fields)
+        except Exception as exc:  # noqa: BLE001
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
+        print(_green(f"{_OK} updated URL '{args.name}'"))
+        if args.json:
+            print(LiveAPISec.dump(env))
+        return 0
+
+    if action == "rm":
+        if not args.name:
+            print("error: urls rm needs --name", file=sys.stderr)
+            return 2
+        try:
+            client.remove_environment(args.site, args.name)
+        except Exception as exc:  # noqa: BLE001
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
+        print(_green(f"{_OK} removed URL '{args.name}'"))
+        return 0
+
+    print(f"error: unknown urls action '{action}'", file=sys.stderr)
+    return 2
+
+
+def _cmd_versions(client: LiveAPISec, args: argparse.Namespace) -> int:
+    """Lista wersji specyfikacji site'u — do przypinania na URL-ach (TODO 2.50)."""
+    if not args.site:
+        print("error: --site (site_id) is required", file=sys.stderr)
+        return 2
+    versions = client.list_versions(args.site)
+    if args.json:
+        print(LiveAPISec.dump(versions))
+        return 0
+    if not versions:
+        print(_dim("no versions yet — push a spec first"))
+        return 0
+    print(_dim(f"versions of site {args.site} (newest first):"))
+    for v in versions:
+        mark = _green(" (current)") if v.get("is_current") else ""
+        note = f"  {_dim(v['note'])}" if v.get("note") else ""
+        used = f"  {_dim('used by: ' + ', '.join(v['used_by']))}" if v.get("used_by") else ""
+        created = str(v.get("created_at") or "")[:10]
+        print(
+            f"  {v.get('version')}{mark}  {v.get('endpoints_count', '?')} endpoints"
+            f"  {created}{note}{used}"
+        )
+    print(_dim(f"pin one: liveapisec urls set --site {args.site} --name <url> --version <version>"))
+    return 0
+
+
+def _cmd_delete(client: LiveAPISec, args: argparse.Namespace) -> int:
+    """Usuń site albo cały projekt (i wszystkie dane) — TODO 2.50."""
+    site = getattr(args, "site", None)
+    project = getattr(args, "project", None)
+    if bool(site) == bool(project):
+        print("error: pass exactly one of --site or --project", file=sys.stderr)
+        return 2
+    target = f"site {site}" if site else f"project '{project}'"
+    if not getattr(args, "yes", False):
+        try:
+            answer = input(f"Delete {target} and ALL its data? [y/N] ").strip().lower()
+        except EOFError:
+            answer = ""
+        if answer not in ("y", "yes"):
+            print("aborted", file=sys.stderr)
+            return 1
+    try:
+        if site:
+            client.delete_site(site)
+        else:
+            client.delete_project(project)
+    except Exception as exc:  # noqa: BLE001
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    print(_green(f"{_OK} deleted {target}"))
     return 0
 
 
@@ -1658,6 +1841,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_scan.add_argument("--branch")
     p_scan.add_argument("--commit")
     p_scan.add_argument("--wait", action="store_true", help="poll until finished")
+    p_scan.add_argument(
+        "--url",
+        default=None,
+        help="URL/environment name to test the site's endpoints against "
+        "(see `liveapisec sites --site <id>`); default: site base_url",
+    )
     p_scan.add_argument(
         "--tunnel",
         action="store_true",
@@ -1831,6 +2020,41 @@ def build_parser() -> argparse.ArgumentParser:
     _json_flag(p_sites)
     p_sites.set_defaults(func=_cmd_sites)
 
+    p_urls = sub.add_parser(
+        "urls",
+        help="list/add/update/remove URLs (environments) — same endpoints, many addresses",
+    )
+    p_urls.add_argument(
+        "action", nargs="?", choices=["list", "add", "set", "rm"], default="list"
+    )
+    p_urls.add_argument("--site", required=True)
+    p_urls.add_argument("--name", help="URL/environment name (add/set/rm)")
+    p_urls.add_argument("--url", dest="base_url", help="target address (add/set)")
+    p_urls.add_argument(
+        "--version", default=None, help="'latest' or a spec version from /versions (add/set)"
+    )
+    p_urls.add_argument(
+        "--schedule", choices=["off", "6h", "12h", "24h", "weekly"], default=None
+    )
+    p_urls.add_argument("--paused", action="store_true", help="pause scheduled scans (set)")
+    _json_flag(p_urls)
+    p_urls.set_defaults(func=_cmd_urls)
+
+    p_versions = sub.add_parser(
+        "versions", help="list spec versions of a site (to pin on a URL)"
+    )
+    p_versions.add_argument("--site", required=True)
+    _json_flag(p_versions)
+    p_versions.set_defaults(func=_cmd_versions)
+
+    p_delete = sub.add_parser(
+        "delete", help="delete a site or a whole project (and all its data)"
+    )
+    p_delete.add_argument("--site", help="site id to delete")
+    p_delete.add_argument("--project", help="project name to delete (all its sites)")
+    p_delete.add_argument("--yes", action="store_true", help="skip confirmation prompt")
+    p_delete.set_defaults(func=_cmd_delete)
+
     p_projects = sub.add_parser(
         "projects",
         help="list projects with sites and the last test status — results straight in the terminal",
@@ -1866,6 +2090,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_cert.add_argument("--project", help="project name (scope=project)")
     p_cert.add_argument("--site", help="site id (scope=site)")
+    p_cert.add_argument(
+        "--url",
+        default=None,
+        help="environment/URL name the PUBLIC certificate concerns (with --site); "
+        "pass an empty string to use the default base_url. The URL is not shown publicly.",
+    )
     p_cert.add_argument(
         "--pdf",
         action="store_true",

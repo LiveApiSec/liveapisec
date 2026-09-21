@@ -163,6 +163,65 @@ class LiveAPISec:
             params["site"] = site
         return self._request("GET", "/developers/certificate", params=params)
 
+    def set_site_certificate_url(
+        self, site_id: str, environment: str | None
+    ) -> dict[str, Any]:
+        """TODO 2.50: choose which URL the PUBLIC site certificate concerns.
+
+        `environment=None` = the site's default base_url. The selected URL is not
+        shown on the public certificate/trust page.
+        """
+        return self._request(
+            "PATCH", f"/developers/sites/{site_id}/certificate", json={"environment": environment}
+        )
+
+    # -- URLs / environments (TODO 2.50) -------------------------------------
+    def list_environments(self, site_id: str) -> list[dict[str, Any]]:
+        """All URLs of a site — the same endpoint set is tested against each."""
+        return self._request("GET", f"/developers/sites/{site_id}/environments")
+
+    def list_versions(self, site_id: str) -> list[dict[str, Any]]:
+        """All spec versions of a site — to pin on a URL (`urls set --version`)."""
+        return self._request("GET", f"/developers/sites/{site_id}/versions")
+
+    def add_environment(
+        self,
+        site_id: str,
+        name: str,
+        base_url: str,
+        version: str = "latest",
+        schedule: str | None = None,
+    ) -> dict[str, Any]:
+        """Add a URL (environment) to a site."""
+        payload: dict[str, Any] = {
+            "name": name,
+            "base_url": base_url,
+            "version": version or "latest",
+        }
+        if schedule:
+            payload["schedule"] = schedule
+        return self._request("POST", f"/developers/sites/{site_id}/environments", json=payload)
+
+    def update_environment(self, site_id: str, name: str, **fields: Any) -> dict[str, Any]:
+        """Update a URL (base_url / version / schedule / paused)."""
+        payload = {k: v for k, v in fields.items() if v is not None}
+        return self._request(
+            "PATCH", f"/developers/sites/{site_id}/environments/{name}", json=payload
+        )
+
+    def remove_environment(self, site_id: str, name: str) -> None:
+        """Remove a URL from a site."""
+        self._request("DELETE", f"/developers/sites/{site_id}/environments/{name}")
+
+    # -- delete site / project (TODO 2.50) ------------------------------------
+    def delete_site(self, site_id: str) -> None:
+        """Delete a site and all its data (scans, findings, URLs, versions, cert)."""
+        self._request("DELETE", f"/developers/sites/{site_id}")
+
+    def delete_project(self, project: str) -> None:
+        """Delete a whole project (all its sites and their data)."""
+        self._request("DELETE", f"/developers/projects/{project}")
+
     # -- scans ----------------------------------------------------------------
     def trigger_scan(
         self,
@@ -171,6 +230,7 @@ class LiveAPISec:
         commit: str | None = None,
         tunnel: bool = False,
         auth_b: dict[str, Any] | None = None,
+        environment: str | None = None,
     ) -> dict[str, Any]:
         """Trigger a scan (202). Returns {scan_id, status, branch, commit}.
 
@@ -179,6 +239,8 @@ class LiveAPISec:
         `auth_b` is a second identity for the auth-matrix RBAC test, e.g.
         `{"auth_method": "bearer", "fields": {"token": "..."}}` — it is
         encrypted server-side and lives only on this scan's document.
+        `environment` (TODO 2.50) is a URL name — the site's endpoint set is
+        tested against that URL's base_url (see `environments` on the site).
         """
         payload: dict[str, Any] = {}
         if branch:
@@ -189,6 +251,8 @@ class LiveAPISec:
             payload["tunnel"] = True
         if auth_b:
             payload["auth_b"] = auth_b
+        if environment:
+            payload["environment"] = environment
         return self._request("POST", f"/developers/sites/{site_id}/scans", json=payload)
 
     # -- reverse tunnel (A): CLI as a proxy for internal/localhost tests ------

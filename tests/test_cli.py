@@ -520,7 +520,9 @@ class _GateClient:
     def __init__(self, findings) -> None:
         self.findings = findings
 
-    def trigger_scan(self, site_id, branch=None, commit=None, tunnel=False, auth_b=None):
+    def trigger_scan(
+        self, site_id, branch=None, commit=None, tunnel=False, auth_b=None, environment=None
+    ):
         return {"scan_id": "s1", "status": "queued"}
 
     def wait_for_scan(self, site_id, scan_id):
@@ -1209,6 +1211,25 @@ def test_trigger_scan_sends_auth_b() -> None:
     assert captured["body"]["auth_b"]["fields"] == {"token": "second"}
 
 
+def test_trigger_scan_sends_environment() -> None:
+    """TODO 2.50: `scan --url <name>` przekazuje environment do API."""
+    captured: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = json.loads(request.content)
+        return httpx.Response(202, json={"scan_id": "s1", "status": "queued"})
+
+    _client(handler).trigger_scan("site1", environment="staging")
+    assert captured["body"]["environment"] == "staging"
+
+
+def test_scan_parser_has_url_flag() -> None:
+    from liveapisec.cli import build_parser
+
+    args = build_parser().parse_args(["scan", "--site", "s1", "--url", "staging"])
+    assert args.url == "staging"
+
+
 def test_scan_parser_has_auth_b_flags() -> None:
     from liveapisec.cli import build_parser
 
@@ -1358,3 +1379,174 @@ def test_cli_ask_followup_parser() -> None:
 
     args = build_parser().parse_args(["ask", "followup", "--session", "s"])
     assert args.ask_command == "followup"
+
+
+# --- TODO 2.50: wersje per-URL + publiczny certyfikat per-URL ---------------
+
+
+def test_set_site_certificate_url_sdk() -> None:
+    captured: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["method"] = request.method
+        captured["path"] = request.url.path
+        captured["body"] = json.loads(request.content)
+        return httpx.Response(200, json={"environment": "staging"})
+
+    _client(handler).set_site_certificate_url("s1", "staging")
+    assert captured["method"] == "PATCH"
+    assert captured["path"].endswith("/developers/sites/s1/certificate")
+    assert captured["body"]["environment"] == "staging"
+
+
+def test_cli_certificate_url_flag(capsys) -> None:
+    from liveapisec.cli import _cmd_certificate
+
+    calls: dict = {}
+
+    class Client:
+        def set_site_certificate_url(self, site, environment):
+            calls["site"] = site
+            calls["env"] = environment
+            return {}
+
+        def get_certificate(self, scope="org", project=None, site=None):
+            return {"scope": "site", "slug": "s", "trust_url": "u", "embeds": {}}
+
+    class Args:
+        json = False
+        type = "badge"
+        scope = "site"
+        project = None
+        site = "s1"
+        url = "staging"
+        pdf = False
+        scan = None
+        output = None
+        variant = None
+
+    assert _cmd_certificate(Client(), Args()) == 0
+    assert calls == {"site": "s1", "env": "staging"}
+
+
+def test_certificate_parser_has_url_flag() -> None:
+    from liveapisec.cli import build_parser
+
+    args = build_parser().parse_args(["certificate", "--site", "s1", "--url", "staging"])
+    assert args.url == "staging"
+
+
+def test_cli_sites_shows_url_versions(capsys) -> None:
+    from liveapisec.cli import _cmd_sites
+
+    class Client:
+        def get_site(self, site):
+            return {
+                "site_id": "s1",
+                "name": "api",
+                "endpoints_count": 1,
+                "base_url": "https://x",
+                "environments": [
+                    {
+                        "name": "prod",
+                        "base_url": "https://p",
+                        "version": "1.2.3",
+                        "schedule": "off",
+                        "paused": False,
+                    },
+                    {
+                        "name": "dev",
+                        "base_url": "https://d",
+                        "version": "latest",
+                        "schedule": "6h",
+                        "paused": False,
+                    },
+                ],
+            }
+
+    class Args:
+        json = False
+        site = "s1"
+
+    assert _cmd_sites(Client(), Args()) == 0
+    out = capsys.readouterr().out
+    assert "prod: https://p  [version=1.2.3]" in out
+    assert "dev: https://d  [schedule=6h]" in out
+
+
+def test_cli_versions_lists_and_marks(capsys) -> None:
+    from liveapisec.cli import _cmd_versions
+
+    class Client:
+        def list_versions(self, site):
+            return [
+                {
+                    "version": "1.0.1",
+                    "note": "merge: +3 endpoints",
+                    "created_at": "2026-09-21T00:00:00",
+                    "endpoints_count": 5,
+                    "used_by": ["prod"],
+                    "is_current": True,
+                },
+                {
+                    "version": "1.0.0",
+                    "note": "initial",
+                    "created_at": "2026-09-20T00:00:00",
+                    "endpoints_count": 4,
+                    "used_by": [],
+                    "is_current": False,
+                },
+            ]
+
+    class Args:
+        json = False
+        site = "s1"
+
+    assert _cmd_versions(Client(), Args()) == 0
+    out = capsys.readouterr().out
+    assert "1.0.1" in out and "(current)" in out
+    assert "used by: prod" in out
+
+
+def test_versions_parser() -> None:
+    from liveapisec.cli import build_parser
+
+    args = build_parser().parse_args(["versions", "--site", "s1"])
+    assert args.site == "s1"
+
+
+def test_cli_delete_site_and_project(capsys) -> None:
+    from liveapisec.cli import _cmd_delete
+
+    calls: dict = {}
+
+    class Client:
+        def delete_site(self, site):
+            calls["site"] = site
+
+        def delete_project(self, project):
+            calls["project"] = project
+
+    class A:
+        site = "s1"
+        project = None
+        yes = True
+        json = False
+
+    class B:
+        site = None
+        project = "acme"
+        yes = True
+        json = False
+
+    class C:
+        site = None
+        project = None
+        yes = True
+        json = False
+
+    assert _cmd_delete(Client(), A()) == 0
+    assert calls["site"] == "s1"
+    assert _cmd_delete(Client(), B()) == 0
+    assert calls["project"] == "acme"
+    assert _cmd_delete(Client(), C()) == 2  # trzeba podać dokładnie jedno

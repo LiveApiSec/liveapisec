@@ -281,6 +281,11 @@ liveapisec scan --site SITE_ID --branch main --commit "$SHA" \
 
 - `--wait` — polls until the scan finishes (default timeout 600 s,
   interval 3 s; change with `--timeout` / `--poll-interval`).
+- `--url <name>` — test the site's endpoints against a specific URL (a site can
+  have several URLs — dev/staging/prod — all sharing the same endpoints; see
+  `liveapisec sites --site SITE_ID` or `liveapisec urls --site SITE_ID`). Each
+  URL can pin a spec **version** (`liveapisec urls set --name prod --version X`).
+  Without `--url`, the site's default `base_url` is used.
 - `--fail-on high` — **exit code 1** when a finding of severity `high`/`critical`
   is found; `--fail-on critical` only for criticals; omit it → always exit 0
   (except errors).
@@ -428,8 +433,72 @@ liveapisec all --site SITE_ID --auth-token-b "$USER_B_JWT"
 
 ### 11. `sites` — site details
 
+Shows the site's endpoints count, default base_url, project, schedule — and the
+list of **URLs** (all tested with the same endpoints). Each URL can test a pinned
+spec **version** (`latest` or a snapshot). Run a scan against one with
+`scan --url <name>`.
+
 ```bash
 liveapisec sites --site SITE_ID
+# site 65f...: my-api — 12 endpoints
+#   base_url: https://api.example.com
+#   urls (same endpoints tested against each):
+#     - development: https://api.dev.example.com  [schedule=6h]
+#     - staging: https://api.stage.example.com
+#     - production: https://api.example.com  [version=1.0.3]
+```
+
+### 15. `urls` — manage URLs (environments) of a site
+
+One endpoint set, many addresses (dev/staging/prod). Each URL has its own spec
+**version** (`latest` or a snapshot), **schedule** and `paused`. See
+[URLs, versions & certificate](../docs/URLS_VERSIONS_CERTIFICATES.md).
+
+```bash
+# list
+liveapisec urls --site SITE_ID
+
+# add (same endpoints tested against each URL)
+liveapisec urls add --site SITE_ID --name dev  --url https://dev.example.com
+liveapisec urls add --site SITE_ID --name prod --url https://api.example.com
+
+# pin a spec version / set schedule / pause
+liveapisec urls set --site SITE_ID --name prod --version 1.0.3
+liveapisec urls set --site SITE_ID --name prod --schedule 24h
+liveapisec urls set --site SITE_ID --name prod --paused
+
+# remove
+liveapisec urls rm --site SITE_ID --name dev
+```
+
+`--version` accepts `latest` (default) or a version from
+`liveapisec sites`/the Versions tab. Adding/updating with an unknown version is
+rejected (400) — no silent testing of the wrong spec.
+
+### 16. `versions` — list spec versions of a site
+
+Shows every snapshot of the endpoint set (newest first): version, endpoints
+count, date, change note, which URLs pin it (`used by`) and which is `current`.
+Use a version with `urls set --version`.
+
+```bash
+liveapisec versions --site SITE_ID
+# versions of site 65f... (newest first):
+#   1.0.3 (current)  42 endpoints  2026-09-21  merge: +3 endpoints  used by: dev
+#   1.0.2            40 endpoints  2026-09-18  edited GET /users   used by: prod
+#   1.0.0            38 endpoints  2026-09-10  initial push (CI/CD)
+
+liveapisec versions --site SITE_ID --json   # raw list (for scripts / agents)
+```
+
+### 17. `delete` — delete a site or a whole project
+
+Removes the site/project and **all** its data (scans, findings, URLs, versions,
+credentials, certificate). Asks for confirmation unless `--yes`.
+
+```bash
+liveapisec delete --site SITE_ID
+liveapisec delete --project acme --yes
 ```
 
 ### 12. `scans` — full test (scan) history for a site
@@ -477,10 +546,20 @@ liveapisec certificate                                  # whole organisation
 liveapisec certificate --scope project --project acme
 liveapisec certificate --scope site --site SITE_ID
 liveapisec certificate --type badge   # badge | banner | card | iframe
+
+# which URL the PUBLIC site certificate concerns (not shown publicly):
+liveapisec certificate --site SITE_ID --url production
+liveapisec certificate --site SITE_ID --url ""          # back to the default base_url
 ```
 
-Paste the returned snippet (`<div data-liveapisec-widget ...>` + `widget.js`)
-into your site, docs or trust page — it updates with every scan.
+Paste the returned snippet (an `<a href=...>` wrapping `<div data-liveapisec-widget ...>`,
+plus `widget.js`) into your site, docs or trust page. The link is static in the HTML
+(crawlable) and the whole widget is clickable — it updates with every scan.
+
+The public certificate can be generated for any URL, but the **public** site
+certificate reflects one selected URL (its status is computed only from that
+URL's scans). The URL itself is **never shown** on the public page/widget — see
+[URLs, versions & certificate](../docs/URLS_VERSIONS_CERTIFICATES.md).
 
 ### 14. `connect` — reverse tunnel (test localhost / internal)
 
