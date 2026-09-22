@@ -1550,3 +1550,189 @@ def test_cli_delete_site_and_project(capsys) -> None:
     assert _cmd_delete(Client(), B()) == 0
     assert calls["project"] == "acme"
     assert _cmd_delete(Client(), C()) == 2  # trzeba podać dokładnie jedno
+
+
+def test_push_spec_file_sends_full_spec(tmp_path) -> None:
+    """TODO 2.50: `--spec-file` wysyła CAŁY spec (parametry/security), nie tylko endpointy."""
+    from liveapisec.cli import _cmd_push
+
+    spec = {
+        "openapi": "3.0.0",
+        "info": {"title": "T", "version": "1"},
+        "paths": {
+            "/users": {
+                "get": {
+                    "parameters": [{"name": "q", "in": "query", "schema": {"type": "string"}}],
+                    "security": [{"bearer": []}],
+                }
+            }
+        },
+    }
+    p = tmp_path / "openapi.json"
+    p.write_text(json.dumps(spec))
+
+    calls: dict = {}
+
+    class Client:
+        def create_site(self, **kw):
+            calls.update(kw)
+            return {"site_id": "s1", "name": kw["name"], "endpoints_count": 1, "auth": "none"}
+
+    class Args:
+        spec_file = str(p)
+        name = "n"
+        base_url = "http://x.test"
+        project = None
+        endpoint: list = []  # noqa: RUF012
+        openapi_url = None
+        site = None
+        auth_type = "none"
+        auth_token = None
+        auth_cookie = None
+        auth_header = "X-API-Key"
+        auth_token_url = None
+        auth_client_id = None
+        auth_client_secret = None
+        verify = False
+        json = False
+
+    assert _cmd_push(Client(), Args()) == 0
+    assert calls["spec"] == spec  # pełny spec, nie lista endpointów
+    assert calls["endpoints"] == []
+
+
+def test_md_report_summary_and_points_to_improve() -> None:
+    """TODO 2.50: raport MD ma Summary (ryzyko) + Points to improve (Why/Fix)."""
+    from liveapisec.cli import _md_report
+
+    scan = {
+        "scan_id": "s1",
+        "status": "completed",
+        "summary": {
+            "tests_run": 100,
+            "tested": 124,
+            "absent": 3,
+            "findings": 1,
+            "by_severity": {"low": 1},
+        },
+    }
+    findings = [
+        {
+            "severity": "low",
+            "title": "Missing rate limiting on GET /healthz",
+            "target": "GET /healthz",
+            "category": "rate_limit",
+            "description": "12 rapid requests returned no 429",
+        }
+    ]
+    ask = {
+        "session_id": "abc",
+        "questions": 10,
+        "counts": {"pass": 1, "fail": 1, "na": 0, "unanswered": 8},
+        "failed": [
+            {
+                "qid": "SEC-ASK-2",
+                "category": "authentication",
+                "severity": "high",
+                "question": "Hash?",
+                "fix": "Use argon2id",
+                "note": "bcrypt",
+            }
+        ],
+    }
+    md = _md_report(scan, findings, ask_summary=ask)
+    assert "## Summary" in md
+    assert "Points to improve" in md
+    assert "Coverage" in md and "124 tested" in md and "3 not deployed" in md
+    assert "[SCAN]" in md and "[QUESTIONNAIRE]" in md
+    assert "**Fix:**" in md
+    assert "Use argon2id" in md  # fix z pytania ask
+    assert "429" in md  # z opisu findingu (Why)
+
+
+def test_print_scan_summary(capsys) -> None:
+    """TODO 2.50: `scan --wait` drukuje risk/coverage/points to improve."""
+    from liveapisec.cli import _print_scan_summary
+
+    scan = {"summary": {"tested": 124, "absent": 3, "by_severity": {"low": 1}}}
+    findings = [
+        {
+            "severity": "low",
+            "title": "Missing rate limiting on GET /healthz",
+            "target": "GET /healthz",
+            "category": "rate_limit",
+            "description": "no 429",
+        }
+    ]
+    _print_scan_summary(scan, findings)
+    out = capsys.readouterr().out
+    assert "risk=LOW" in out
+    assert "124 tested" in out and "3 not deployed" in out
+    assert "points to improve" in out
+    assert "Missing rate limiting" in out
+
+    _print_scan_summary({"summary": {"tested": 5}}, [])
+    assert "no findings" in capsys.readouterr().out
+
+
+def test_hacker_parser_has_destructive_flag() -> None:
+    from liveapisec.cli import build_parser
+
+    args = build_parser().parse_args(["hacker", "--site", "s1", "--env", "dev"])
+    assert args.destructive is False
+    args2 = build_parser().parse_args(
+        ["hacker", "--site", "s1", "--env", "dev", "--destructive"]
+    )
+    assert args2.destructive is True
+
+
+def test_trigger_hacker_scan_sends_destructive() -> None:
+    captured: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = json.loads(request.content)
+        return httpx.Response(202, json={"scan_id": "h1", "status": "queued"})
+
+    _client(handler).trigger_hacker_scan("s1", "dev", destructive=True)
+    assert captured["body"]["destructive"] is True
+
+
+def test_hacker_parser_has_thorough_flag() -> None:
+    from liveapisec.cli import build_parser
+
+    args = build_parser().parse_args(["hacker", "--site", "s1", "--env", "dev"])
+    assert args.thorough is False
+    args2 = build_parser().parse_args(["hacker", "--site", "s1", "--env", "dev", "--thorough"])
+    assert args2.thorough is True
+
+
+def test_trigger_hacker_scan_sends_thorough() -> None:
+    captured: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = json.loads(request.content)
+        return httpx.Response(202, json={"scan_id": "h1", "status": "queued"})
+
+    _client(handler).trigger_hacker_scan("s1", "dev", thorough=True)
+    assert captured["body"]["thorough"] is True
+
+
+def test_clerk_auth_parser_and_payload() -> None:
+    from liveapisec.cli import _build_auth, _validate_auth, build_parser
+
+    args = build_parser().parse_args(
+        [
+            "push", "--name", "x", "--base-url", "http://x",
+            "--auth-type", "clerk",
+            "--auth-clerk-secret", "sk_test_x",
+            "--auth-clerk-user", "user_1",
+            "--auth-clerk-org", "org_1",
+            "--endpoint", "GET /me",
+        ]
+    )
+    auth = _build_auth(args)
+    assert auth["type"] == "clerk"
+    assert auth["clerk_secret"] == "sk_test_x"
+    assert auth["clerk_user_id"] == "user_1"
+    assert auth["clerk_org_id"] == "org_1"
+    assert _validate_auth(args, auth) is None

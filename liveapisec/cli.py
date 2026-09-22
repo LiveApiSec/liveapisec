@@ -209,7 +209,7 @@ def _parse_endpoint(value: str) -> dict[str, str]:
 def _auth_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--auth-type",
-        choices=["none", "jwt", "bearer", "cookie", "api_key", "oauth2"],
+        choices=["none", "jwt", "bearer", "cookie", "api_key", "oauth2", "login", "clerk"],
         default="none",
     )
     parser.add_argument("--auth-token", help="token for jwt/bearer/api_key")
@@ -220,6 +220,26 @@ def _auth_args(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument("--auth-client-id", help="OAuth2 client_id for type=oauth2")
     parser.add_argument("--auth-client-secret", help="OAuth2 client_secret for type=oauth2")
+    # TODO 2.50: login username/password → token (krótkotrwałe JWT).
+    parser.add_argument("--auth-login-url", help="login endpoint for type=login")
+    parser.add_argument("--auth-username", help="username/email for type=login")
+    parser.add_argument("--auth-password", help="password for type=login")
+    parser.add_argument(
+        "--auth-token-field", default=None, help="token path in login response (default access_token)"
+    )
+    parser.add_argument(
+        "--auth-username-field", default=None, help="body field for username (default email)"
+    )
+    parser.add_argument(
+        "--auth-password-field", default=None, help="body field for password (default password)"
+    )
+    parser.add_argument(
+        "--auth-body", choices=["json", "form"], default=None, help="login body format (default json)"
+    )
+    # TODO 2.50: Clerk (test-instancja) — świeży session-JWT per skan.
+    parser.add_argument("--auth-clerk-secret", help="Clerk Backend API secret (sk_test_...) for type=clerk")
+    parser.add_argument("--auth-clerk-user", help="Clerk user_id (user_...) for type=clerk")
+    parser.add_argument("--auth-clerk-org", help="optional Clerk org_id (active_organization_id) for type=clerk")
 
 
 def _build_auth(args: argparse.Namespace) -> dict[str, Any] | None:
@@ -236,6 +256,23 @@ def _build_auth(args: argparse.Namespace) -> dict[str, Any] | None:
         auth["token_url"] = args.auth_token_url
         auth["client_id"] = args.auth_client_id
         auth["client_secret"] = args.auth_client_secret
+    if args.auth_type == "login":
+        auth["login_url"] = args.auth_login_url
+        auth["username"] = args.auth_username
+        auth["password"] = args.auth_password
+        for key, val in (
+            ("token_field", getattr(args, "auth_token_field", None)),
+            ("username_field", getattr(args, "auth_username_field", None)),
+            ("password_field", getattr(args, "auth_password_field", None)),
+            ("body", getattr(args, "auth_body", None)),
+        ):
+            if val:
+                auth[key] = val
+    if args.auth_type == "clerk":
+        auth["clerk_secret"] = args.auth_clerk_secret
+        auth["clerk_user_id"] = args.auth_clerk_user
+        if getattr(args, "auth_clerk_org", None):
+            auth["clerk_org_id"] = args.auth_clerk_org
     return auth
 
 
@@ -252,6 +289,16 @@ def _validate_auth(args: argparse.Namespace, auth: dict[str, Any] | None) -> str
         args.auth_token_url and args.auth_client_id and args.auth_client_secret
     ):
         return "--auth-token-url, --auth-client-id and --auth-client-secret required for auth-type=oauth2"
+    if t == "login" and not (
+        getattr(args, "auth_login_url", None)
+        and getattr(args, "auth_username", None)
+        and getattr(args, "auth_password", None)
+    ):
+        return "--auth-login-url, --auth-username and --auth-password required for auth-type=login"
+    if t == "clerk" and not (
+        getattr(args, "auth_clerk_secret", None) and getattr(args, "auth_clerk_user", None)
+    ):
+        return "--auth-clerk-secret and --auth-clerk-user required for auth-type=clerk"
     return None
 
 
@@ -351,7 +398,14 @@ def _fmt_scan(scan: dict[str, Any]) -> str:
                 by_sev.items(), key=lambda kv: _SEV.index(kv[0]) if kv[0] in _SEV else 9
             )
         )
-        parts.append(f"tests={summary.get('tests_run', '?')}")
+        # TODO 2.50: hacker mode nie ma `tests_run` — pokaż requests/steps/risk.
+        if scan.get("mode") == "hacker":
+            parts.append(f"requests={summary.get('requests', '?')}")
+            parts.append(f"steps={summary.get('steps', '?')}")
+            if summary.get("risk_level"):
+                parts.append(f"risk={str(summary['risk_level']).upper()}")
+        else:
+            parts.append(f"tests={summary.get('tests_run', '?')}")
         parts.append(f"findings={summary.get('findings', 0)}" + (f" ({sev})" if sev else ""))
     return " ".join(parts)
 
@@ -366,10 +420,11 @@ def _fmt_finding(f: dict[str, Any]) -> str:
     return line
 
 
-def _endpoints_from_spec_file(path: str) -> list[dict[str, str]]:
-    """Parsuj lokalny OpenAPI (JSON/YAML) na listę {method, path}.
+def _load_spec_file(path: str) -> dict:
+    """Wczytaj lokalny OpenAPI (JSON/YAML) jako PEŁNY dict (TODO 2.50).
 
-    Serwer nie pobiera niczego (brak SSRF) — wysyłamy gotowe endpointy.
+    Zachowuje parametry, requestBody, schematy i security. Serwer nic nie
+    pobiera (brak SSRF) — wysyłamy cały spec w polu `spec`.
     """
     import json
 
@@ -394,6 +449,16 @@ def _endpoints_from_spec_file(path: str) -> list[dict[str, str]]:
             raise LiveAPISecError("Spec file error", f"cannot parse {path}: {exc}") from exc
     if not isinstance(spec, dict) or not isinstance(spec.get("paths"), dict):
         raise LiveAPISecError("Spec file error", f"{path} has no OpenAPI 'paths' object")
+    return spec
+
+
+def _endpoints_from_spec_file(path: str) -> list[dict[str, str]]:
+    """Parsuj lokalny OpenAPI (JSON/YAML) na listę {method, path}.
+
+    (Kompatybilność — `push` wysyła teraz cały spec; to zostaje dla narzędzi,
+    które potrzebują tylko listy endpointów.)
+    """
+    spec = _load_spec_file(path)
     methods = ("GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS")
     out = []
     for route, ops in spec["paths"].items():
@@ -449,11 +514,13 @@ def _cmd_push(client: LiveAPISec, args: argparse.Namespace) -> int:
         return 2
     if getattr(args, "spec_file", None):
         try:
-            args.endpoint = list(args.endpoint or []) + _endpoints_from_spec_file(args.spec_file)
+            spec_payload = _load_spec_file(args.spec_file)
         except LiveAPISecError as exc:
             print(f"error: {exc.title}: {exc.detail}", file=sys.stderr)
             return 2
-    if not args.endpoint and not args.openapi_url:
+    else:
+        spec_payload = None
+    if not args.endpoint and not args.openapi_url and spec_payload is None:
         print("error: provide at least one --endpoint, --spec-file or --openapi-url", file=sys.stderr)
         return 2
     auth = _build_auth(args)
@@ -467,6 +534,7 @@ def _cmd_push(client: LiveAPISec, args: argparse.Namespace) -> int:
         base_url=site_base,
         endpoints=args.endpoint,
         openapi_url=args.openapi_url,
+        spec=spec_payload,
         project=project,
         auth=auth,
         site_id=site_id,
@@ -678,6 +746,40 @@ def _auth_b_args(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def _print_scan_summary(scan: dict[str, Any], findings: list[dict[str, Any]]) -> None:
+    """Krótkie podsumowanie po skanie (TODO 2.50): ryzyko, pokrycie, punkty do poprawy.
+
+    Drukowane na końcu `scan --wait` (obok pełnego raportu z `report`/`all`).
+    """
+    summary = scan.get("summary") or {}
+    by_sev = summary.get("by_severity") or {}
+    tested, absent = summary.get("tested"), summary.get("absent")
+    bits = [f"risk={_md_risk(by_sev)}"]
+    if tested is not None:
+        cov = f"coverage={tested} tested"
+        if absent:
+            cov += f", {absent} not deployed"
+        bits.append(cov)
+    print(_dim("  " + "  ·  ".join(bits)))
+    if not findings:
+        print(_green("  no findings — nothing to improve"))
+        return
+    order = {s: i for i, s in enumerate(_SEV)}
+    ordered = sorted(
+        findings, key=lambda f: order.get(str(f.get("severity", "info")).lower(), 99)
+    )
+    print("  points to improve:")
+    for f in ordered[:10]:
+        sev = str(f.get("severity", "info")).upper()
+        target = f.get("target")
+        print(f"    - [{sev}] {f.get('title')}" + (f"  ({target})" if target else ""))
+        fix = _finding_fix(f)
+        if fix:
+            print(_dim(f"        fix: {fix[:160]}"))
+    if len(ordered) > 10:
+        print(_dim(f"    …and {len(ordered) - 10} more — see `liveapisec report`"))
+
+
 def _cmd_scan(client: LiveAPISec, args: argparse.Namespace) -> int:
     if not args.site:
         print("error: --site (site_id) is required", file=sys.stderr)
@@ -709,6 +811,9 @@ def _cmd_scan(client: LiveAPISec, args: argparse.Namespace) -> int:
         print(LiveAPISec.dump(done))
     else:
         print(_fmt_scan(done))
+        # TODO 2.50: automatyczne, krótkie podsumowanie po zakończonym skanie.
+        if done.get("status") == "completed":
+            _print_scan_summary(done, findings)
 
     if done.get("status") != "completed":
         return 2 if args.fail_on else 0
@@ -810,6 +915,40 @@ def _cmd_connect(client: LiveAPISec, args: argparse.Namespace) -> int:
     return 0
 
 
+def _print_hacker_summary(scan: dict[str, Any]) -> None:
+    """Krótkie podsumowanie hacker-mode (TODO 2.50): risk, plan, proces, rekomendacje."""
+    sm = scan.get("summary") or {}
+    risk = str(sm.get("risk_level") or "?").upper()
+    print(
+        _dim(
+            f"  risk={risk}  ·  requests={sm.get('requests', '?')}  ·  "
+            f"steps={sm.get('steps', '?')}"
+        )
+    )
+    plan = sm.get("plan") or []
+    if plan:
+        print("  attack plan:")
+        for i, p in enumerate(plan, 1):
+            print(f"    {i}. {p}")
+    if len(sm.get("plan_log") or []) > 1:
+        print(_dim(f"    (plan revised {len(sm['plan_log']) - 1}×)"))
+    process = sm.get("process")
+    if process:
+        print(f"  process: {str(process)[:400]}")
+    recs = sm.get("recommendations") or []
+    if recs:
+        print("  recommendations:")
+        for r in recs[:6]:
+            print(f"    - {r}")
+    findings = scan.get("findings") or []
+    if findings:
+        print("  findings:")
+        for f in findings[:10]:
+            print(f"    - [{str(f.get('severity', '?')).upper()}] {f.get('title')}")
+    else:
+        print(_green("  no findings — the agent found no exploitable issue within its scope"))
+
+
 def _cmd_hacker(client: LiveAPISec, args: argparse.Namespace) -> int:
     """Run an autonomous AI hacker-mode test (TODO 3.6.1).
 
@@ -825,7 +964,10 @@ def _cmd_hacker(client: LiveAPISec, args: argparse.Namespace) -> int:
         )
         return 2
     scan = client.trigger_hacker_scan(
-        args.site, args.env, goal=args.goal, tunnel=getattr(args, "tunnel", False)
+        args.site, args.env, goal=args.goal, tunnel=getattr(args, "tunnel", False),
+        destructive=getattr(args, "destructive", False),
+        auth_b=_auth_b_payload(args),
+        thorough=getattr(args, "thorough", False),
     )
     scan_id = scan["scan_id"]
     if args.json:
@@ -851,6 +993,9 @@ def _cmd_hacker(client: LiveAPISec, args: argparse.Namespace) -> int:
         print(LiveAPISec.dump(done))
     else:
         print(_fmt_scan(done))
+        # TODO 2.50: auto-podsumowanie hacker-mode (plan/risk/rekomendacje).
+        if done.get("status") == "completed":
+            _print_hacker_summary(done)
     return 0 if done.get("status") == "completed" else 2
 
 
@@ -1194,6 +1339,91 @@ def _latest_ask_with_answers(client: LiveAPISec, site_id: str) -> dict[str, Any]
     return None
 
 
+# TODO 2.50: rekomendacje „jak naprawić” per kategoria findings (raport opisowy).
+_REMEDIATION: dict[str, str] = {
+    "bola": "Wymuś autoryzację na poziomie obiektu: sprawdzaj, że zalogowany podmiot ma dostęp do KONKRETNEGO id (nie tylko że jest zalogowany). Testuj dwoma tenantami — A musi dostać 403/404 na obiektach B.",
+    "broken_auth": "Wymagaj uwierzytelnienia na każdym niepublicznym endpoincie (deny by default); upewnij się, że guard jest realnie podpięty, a nie tylko zadeklarowany w specyfikacji.",
+    "rbac": "Ujednolic autoryzację między rolami: serwerowa macierz rola→uprawnienie, jednolite allow/deny, domyślnie odmawiaj przy braku reguły.",
+    "mass_assignment": "Whitelistuj pola zapisywalne (DTO/allowlist), żeby klient nie ustawił pól wewnętrznych (role, owner, id, created_at). Ignoruj nieznane klucze.",
+    "injection": "Używaj zapytań parametryzowanych / escapingu drivera; nigdy nie sklejaj wejścia do SQL/NoSQL/komend. Waliduj i odrzucaj nieoczekiwane wejście na granicy.",
+    "rate_limit": "Dodaj limity per-IP (i per-konto dla auth) z 429 + Retry-After; dla wrażliwych endpointów (login, reset, trigger skanu) użyj exponential backoff.",
+    "cors": "Nie odbijaj dowolnego Origin z credentials; jawna allowlist zaufanych originów i tylko potrzebne metody/nagłówki.",
+    "headers": "Dodaj nagłówki bezpieczeństwa: Strict-Transport-Security, X-Content-Type-Options: nosniff, Content-Security-Policy, X-Frame-Options, Referrer-Policy.",
+    "sensitive_params": "Nie umieszczaj sekretów/tokenów/PII w URL (query/path) — wyciekają przez logi, Referer i proxy. Użyj body/nagłówków; jeśli token musi być w URL, zrób go jednorazowym i krótkotrwałym.",
+    "shadow_api": "Zinwentaryzuj i usuń/monitoruj nieudokumentowane endpointy; wymagaj auth i limitów na admin/metrics/debug albo zablokuj je na brzegu.",
+    "jwt_weakness": "Przypnij algorytm podpisu po stronie serwera (odrzuć none/alg confusion), wymagaj signature+exp+iss, krótkie access-tokeny i walidacja na każdym żądaniu.",
+    "method_tampering": "Wymuszaj tę samą autoryzację dla wszystkich metod HTTP na zasobie; nie polegaj na tym, że klient odrzuci metodę.",
+    "info_disclosure": "Zwracaj generyczne błędy (bez stack trace/SQL/wersji); diagnostykę/debug ogranicz do sieci wewnętrznej.",
+    "tech_fingerprint": "Ogranicz banery wersji (Server, X-Powered-By, nagłówki frameworka) i nie ujawniaj wersji bibliotek.",
+    "api_versions": "Wycofaj przestarzałe wersje API lub obejmij je tą samą autoryzacją/limitami; nie eksponuj starych, niełata­nych wersji.",
+    "graphql": "Wymuś autoryzację na poziomie pól, wyłącz introspection na produkcji (jeśli zbędna) i dodaj limity głębokości/złożoności zapytań.",
+    "oauth": "Waliduj redirect_uri względem dokładnej allowlisty, wymagaj state/PKCE oraz krótkotrwałych, rotowanych tokenów.",
+    "ssrf": "Ogranicz pobieranie po stronie serwera do allowlisty hostów/schematów; blokuj prywatne/metadata IP; waliduj i re-resolvuj URL-e.",
+    "ai_probe": "Przejrzyj wynik sondy AI i zastosuj właściwą kontrolę dla tego endpointu.",
+}
+
+
+def _finding_fix(finding: dict[str, Any]) -> str:
+    """Rekomendacja naprawy dla findings (mapa kategorii, fallback na opis)."""
+    cat = str(finding.get("category") or "").lower()
+    return (
+        _REMEDIATION.get(cat)
+        or str(finding.get("description") or "").strip()
+        or "Przejrzyj finding i zastosuj właściwą kontrolę."
+    )
+
+
+def _md_risk(by_sev: dict[str, Any]) -> str:
+    if by_sev.get("critical") or by_sev.get("high"):
+        return "HIGH"
+    if by_sev.get("medium"):
+        return "MEDIUM"
+    if by_sev.get("low"):
+        return "LOW"
+    if by_sev.get("info"):
+        return "INFO"
+    return "NONE"
+
+
+def _md_improvements(
+    findings: list[dict[str, Any]], failed_ask: list[dict[str, Any]] | None
+) -> list[str]:
+    """Sekcja „Points to improve” — opisowo: co, gdzie, dlaczego i jak naprawić."""
+    order = {s: i for i, s in enumerate(_SEV)}
+    blocks: list[str] = []
+    for f in sorted(
+        findings, key=lambda x: order.get(str(x.get("severity", "info")).lower(), 99)
+    ):
+        sev = str(f.get("severity", "info")).upper()
+        target = f.get("target")
+        meta = []
+        if target:
+            meta.append(f"**Endpoint:** `{target}`")
+        if f.get("category"):
+            meta.append(f"**Category:** `{f.get('category')}`")
+        blocks += [
+            f"### [SCAN] [{sev}] {f.get('title') or 'Finding'}",
+        ]
+        if meta:
+            blocks.append("- " + "  ·  ".join(meta))
+        blocks.append(f"- **Why:** {str(f.get('description') or '').strip() or 'See evidence.'}")
+        blocks.append(f"- **Fix:** {_finding_fix(f)}")
+        blocks.append("")
+    for q in (failed_ask or [])[:30]:
+        sev = str(q.get("severity") or "medium").upper()
+        blocks.append(
+            f"### [QUESTIONNAIRE] [{sev}] {q.get('qid')} — {q.get('question')}"
+        )
+        if q.get("note"):
+            blocks.append(f"- **Your note:** {q.get('note')}")
+        if q.get("fix"):
+            blocks.append(f"- **Fix:** {q.get('fix')}")
+        blocks.append("")
+    if not blocks:
+        return []
+    return ["", "## Points to improve", "", *blocks]
+
+
 def _md_report(
     scan: dict[str, Any],
     findings: list[dict[str, Any]],
@@ -1219,6 +1449,29 @@ def _md_report(
     ]
     if scan.get("branch") or scan.get("commit"):
         lines.append(f"- Code: branch `{scan.get('branch')}` commit `{scan.get('commit')}`")
+    # TODO 2.50: pokrycie (tested/absent) + podsumowanie ryzyka.
+    tested = summary.get("tested")
+    absent = summary.get("absent")
+    if tested is not None:
+        cov = f"- Coverage: **{tested} tested**"
+        if absent:
+            cov += f" / **{absent} not deployed on this URL**"
+        total = (tested or 0) + (absent or 0)
+        if total:
+            cov += f" of {total} endpoints"
+        lines.append(cov)
+    failed_ask = (ask_summary or {}).get("failed") or []
+    n_scan = len(findings)
+    lines += [
+        "",
+        "## Summary",
+        "",
+        f"- **Risk: {_md_risk(by_sev)}**"
+        + (" — no findings. 🎉" if n_scan == 0 and not failed_ask else ""),
+        f"- **Points to improve: {n_scan} from the scan**"
+        + (f" + **{len(failed_ask)} from the questionnaire**" if failed_ask else ""),
+    ]
+    lines += _md_improvements(findings, failed_ask)
     if verdict:
         counts = verdict.get("counts") or {}
         mark = "✅ PASS" if verdict.get("verdict") == "pass" else "❌ FAIL"
@@ -1588,6 +1841,29 @@ def _cmd_sites(client: LiveAPISec, args: argparse.Namespace) -> int:
             suffix = f"  [{', '.join(flags)}]" if flags else ""
             print(f"    - {e.get('name')}: {e.get('base_url')}{suffix}")
         print(f"    run one: liveapisec scan --site {args.site} --url <name>")
+    # TODO 2.50: profil auth wykryty ze skanu (schemes + grupy wymagające auth).
+    ap = site.get("auth_profile") or {}
+    if ap:
+        schemes = ap.get("schemes") or []
+        if schemes:
+            desc = ", ".join(
+                f"{s.get('name')}({s.get('type') or s.get('scheme') or '?'})" for s in schemes
+            )
+            print(f"  auth schemes (from spec): {desc}")
+        groups = ap.get("groups") or []
+        if groups:
+            print("  auth requirements (from last scan):")
+            for g in groups:
+                state = "requires auth" if g.get("auth_required") else "public"
+                extra = f", {g['unknown']} write(unknown)" if g.get("unknown") else ""
+                scheme = f"  [{', '.join(g['schemes'])}]" if g.get("schemes") else ""
+                print(
+                    f"    - {g.get('prefix')}: {state} "
+                    f"({g.get('auth_required', 0)} auth / {g.get('public', 0)} public"
+                    f"{extra} of {g.get('total', 0)}){scheme}"
+                )
+        if ap.get("credentials"):
+            print(f"  credentials configured: {', '.join(ap['credentials'])}")
     return 0
 
 
@@ -1735,6 +2011,64 @@ def _cmd_delete(client: LiveAPISec, args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_credentials(client: LiveAPISec, args: argparse.Namespace) -> int:
+    """Zarządzanie credentialami site'u per-prefix (TODO 2.50): list/set/rm.
+
+    Pozwala przypiąć różne zestawy auth do różnych tras, np. dev-key na
+    `/developers`, a Clerk na resztę — jeden skan dobiera właściwy per ścieżka.
+    """
+    if not args.site:
+        print("error: --site (site_id) is required", file=sys.stderr)
+        return 2
+    action = getattr(args, "action", "list") or "list"
+    if action == "list":
+        creds = client.list_credentials(args.site)
+        if args.json:
+            print(LiveAPISec.dump(creds))
+            return 0
+        if not creds:
+            print(_dim("no credentials — set one: liveapisec credentials set --site ID --slot a --auth-type bearer --auth-token …"))
+            return 0
+        for c in creds:
+            pref = c.get("path_prefix") or "(default)"
+            print(f"  - slot={c.get('slot')}  {c.get('auth_method')}  prefix={pref}")
+        return 0
+    if action == "set":
+        if not getattr(args, "slot", None):
+            print("error: credentials set needs --slot", file=sys.stderr)
+            return 2
+        auth = _build_auth(args)
+        if auth is None:
+            print("error: provide --auth-type (and its fields)", file=sys.stderr)
+            return 2
+        err = _validate_auth(args, auth)
+        if err:
+            print(f"error: {err}", file=sys.stderr)
+            return 2
+        try:
+            out = client.set_credential(
+                args.site, args.slot, auth, path_prefix=getattr(args, "path", None)
+            )
+        except Exception as exc:  # noqa: BLE001
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
+        pref = out.get("path_prefix") or "(default)"
+        print(_green(f"{_OK} credential slot={out.get('slot')} {out.get('auth_method')} prefix={pref}"))
+        return 0
+    if action == "rm":
+        if not getattr(args, "slot", None):
+            print("error: credentials rm needs --slot", file=sys.stderr)
+            return 2
+        try:
+            client.remove_credential(args.site, args.slot)
+        except Exception as exc:  # noqa: BLE001
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
+        print(_green(f"{_OK} removed credential slot={args.slot}"))
+        return 0
+    return 2
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="liveapisec",
@@ -1875,7 +2209,21 @@ def build_parser() -> argparse.ArgumentParser:
         help="optional guided attack objective, e.g. \"check /users for IDOR\" "
         "(TODO 3.6.2)",
     )
+    # TODO 2.50 — druga tożsamość do testów różnicowych IDOR/RBAC w hacker-mode.
+    _auth_b_args(p_hacker)
     p_hacker.add_argument("--wait", action="store_true", help="poll until the agent finishes")
+    p_hacker.add_argument(
+        "--destructive",
+        action="store_true",
+        help="allow state-changing methods (POST/PUT/PATCH/DELETE); default is READ-ONLY "
+        "(GET/HEAD/OPTIONS only)",
+    )
+    p_hacker.add_argument(
+        "--thorough",
+        action="store_true",
+        help="'real hacker' mode: no step/request limits, full endpoint coverage, "
+        "deterministic A/B/anon differential (auto-IDOR). Ignores AI cost budget.",
+    )
     p_hacker.add_argument(
         "--tunnel",
         action="store_true",
@@ -2054,6 +2402,19 @@ def build_parser() -> argparse.ArgumentParser:
     p_delete.add_argument("--project", help="project name to delete (all its sites)")
     p_delete.add_argument("--yes", action="store_true", help="skip confirmation prompt")
     p_delete.set_defaults(func=_cmd_delete)
+
+    p_creds = sub.add_parser(
+        "credentials", help="manage site credentials per-prefix (different auth per route group)"
+    )
+    p_creds.add_argument("action", nargs="?", choices=["list", "set", "rm"], default="list")
+    p_creds.add_argument("--site", required=True)
+    p_creds.add_argument("--slot", help="credential slot, e.g. a / b / devkey")
+    p_creds.add_argument(
+        "--path", help="path prefix this credential applies to, e.g. /developers (default: all)"
+    )
+    _auth_args(p_creds)
+    _json_flag(p_creds)
+    p_creds.set_defaults(func=_cmd_credentials)
 
     p_projects = sub.add_parser(
         "projects",

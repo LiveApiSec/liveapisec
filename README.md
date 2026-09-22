@@ -172,9 +172,10 @@ liveapisec push \
 - The same `name` + `base_url` = **the same site** (update, not a duplicate) —
   you can call push in every build.
 - Instead of a list of endpoints you can provide an OpenAPI spec: `--openapi-url https://api.example.com/openapi.json`.
-- Local spec file (no server-side fetch, works with localhost/private URLs that `--openapi-url` blocks): `--spec-file ./openapi.json` (JSON/YAML, parsed locally).
+- Local spec file (no server-side fetch, works with localhost/private URLs that `--openapi-url` blocks): `--spec-file ./openapi.json` (JSON/YAML, parsed locally). The **full** spec is uploaded — parameters, request bodies, schemas and `security` are preserved (so the scanner tests them), not just method+path.
 - Optional token: `--auth-type jwt --auth-token <TOKEN>` (or `bearer`,
   `cookie --auth-cookie "session=..."`, `api_key --auth-header X-API-Key`).
+  For short-lived JWT login flows, use `--auth-type login` (see below).
 - Per-URL automation: `--schedule 6h|12h|24h|weekly` (capped by your plan) and
   `--access external|internal`. `internal` (dev/localhost/private) is **never
   auto-tested** by the scheduler — run it on demand via CLI; setting a schedule
@@ -195,8 +196,51 @@ liveapisec push --name my-api --base-url https://api.example.com \
   --endpoint "GET /users"
 ```
 
-#### Verify the token before you commit to it
+#### Login (username/password) — short-lived JWTs
 
+Many APIs issue a short-lived JWT at a **login endpoint**. Instead of pasting a
+token that expires, give the login URL + credentials — the scanner **logs in at
+every scan** and uses the returned token:
+
+```bash
+liveapisec push --name my-api --base-url https://api.example.com \
+  --auth-type login \
+  --auth-login-url https://api.example.com/auth/login \
+  --auth-username qa@example.com --auth-password "$PASSWORD" \
+  --endpoint "GET /me"
+# optional: --auth-token-field data.access_token  (dot path, default access_token)
+#           --auth-username-field email  --auth-password-field password
+#           --auth-body json|form
+```
+
+#### Clerk (or any JWT-login) — mint a fresh token per scan
+
+If your API is protected by **Clerk** (or another short-lived-JWT provider with a
+backend/machine API), give the scanner a **backend secret + a test user** — it
+mints a fresh session JWT at every scan (no expired-token problem):
+
+```bash
+liveapisec push --name my-api --base-url https://api.example.com \
+  --auth-type clerk \
+  --auth-clerk-secret "$CLERK_TEST_SECRET" \
+  --auth-clerk-user user_xxx \
+  --auth-clerk-org org_xxx \
+  --endpoint "GET /me"
+```
+
+For **cross-tenant / IDOR** testing add a second test user (another org):
+
+```bash
+liveapisec hacker --site SITE_ID --env dev --thorough \
+  --auth-type-b clerk --auth-clerk-secret "$CLERK_TEST_SECRET" \
+  --auth-clerk-user user_BBBB --auth-clerk-org org_BBBB
+```
+
+> Use a **test** Clerk instance (never production). The secret is stored
+> AES-encrypted and never reaches the AI. Tokens are minted via
+> `POST /v1/sessions` → `POST /v1/sessions/{id}/tokens`.
+
+#### Verify the token before you commit to it
 `--verify` probes the first endpoint with the pushed auth and reports whether
 the token actually works (exit 2 on a bad/expired token):
 
@@ -280,7 +324,10 @@ liveapisec scan --site SITE_ID --branch main --commit "$SHA" \
 ```
 
 - `--wait` — polls until the scan finishes (default timeout 600 s,
-  interval 3 s; change with `--timeout` / `--poll-interval`).
+  interval 3 s; change with `--timeout` / `--poll-interval`). When it finishes,
+the CLI prints a short **summary** — risk level, coverage (`tested` / `not
+deployed`) and **points to improve** (each finding with a one-line fix). Full
+descriptive report: `liveapisec report --format md`.
 - `--url <name>` — test the site's endpoints against a specific URL (a site can
   have several URLs — dev/staging/prod — all sharing the same endpoints; see
   `liveapisec sites --site SITE_ID` or `liveapisec urls --site SITE_ID`). Each
@@ -307,6 +354,13 @@ liveapisec hacker --site SITE_ID --env staging --wait
 liveapisec hacker --site SITE_ID --env development \
   --goal "check /users for IDOR — your record vs another user's"
 
+# two identities — differential IDOR/RBAC (A vs B): the agent can send as a/b/anon
+liveapisec hacker --site SITE_ID --env development --wait \
+  --goal "find IDOR" --auth-type-b bearer --auth-token-b "$USER_B_JWT"
+
+# destructive mode (default is READ-ONLY) — allows POST/PUT/PATCH/DELETE
+liveapisec hacker --site SITE_ID --env development --wait --destructive
+
 # localhost / internal target — through a connected CLI tunnel (terminal 1:
 # `liveapisec connect --site SITE_ID`, keep running)
 liveapisec hacker --site SITE_ID --env development --wait --tunnel
@@ -317,7 +371,20 @@ liveapisec hacker --site SITE_ID --env development --wait --tunnel
 - `--goal` — optional guided attack objective (e.g. "check /users for IDOR",
   "try to escalate to admin", "enumerate secrets"). Without it the agent explores
   freely.
-- `--wait` — polls until the AI agent finishes.
+- `--destructive` — **default is READ-ONLY** (only `GET/HEAD/OPTIONS`); write
+  methods are blocked by the server. Add `--destructive` to allow state-changing
+  methods (mass assignment, writes) on dev/staging.
+- `--thorough` — **"real hacker" mode**: no step/request limits (ignores the AI
+  cost budget), ALL endpoints in context (not just top-12), a **deterministic
+  recon pass** (harvests object IDs from responses + an A/B/anon differential
+  matrix → auto-IDOR) and maximal persistence (it does not stop at the first
+  401/403/404). Use with `--auth-token-b` for cross-identity tests.
+- `--auth-token-b` / `--auth-type-b` — a **second identity**; the agent can send
+  the same request as `a`, `b` and `anon` and compare — a confirmed IDOR is when
+  `b`/`anon` receives `a`'s data. Needs the site's main credential (slot A) too.
+- `--wait` — polls until the AI agent finishes. When it finishes, the CLI
+  prints a short **summary**: risk level, requests/steps, the attack plan
+  (with revisions), the agent's **recommendations**, and the request/step budget.
 - **Domain verification**: public targets need a verified domain (the dashboard
   Domains flow). **Localhost / private IPs (e.g. `http://localhost:8000`, `10.x`)
   are exempt** — no domain verification needed for your own local server.
@@ -358,12 +425,23 @@ disclaimer — not a certification):
 liveapisec compliance --site SITE_ID --scan SCAN_ID
 ```
 
-### 9. `report` — full saved scan report
+### 9. `report` — full saved scan report (summary + points to improve)
 
 ```bash
 liveapisec report --site SITE_ID --scan SCAN_ID -o report.json   # save to file
 liveapisec report --site SITE_ID --scan SCAN_ID --json           # print to stdout
+liveapisec report --site SITE_ID --scan SCAN_ID --format md -o report.md
 ```
+
+The **Markdown** report (`--format md` / `-o *.md`) is the descriptive post-test
+summary:
+
+- scan summary + **coverage** (`tested` / `not deployed on this URL`),
+- **Summary** — risk level + how many points to improve,
+- **Points to improve** — prioritized, each with **Why** (from the scan) and
+  **Fix** (how to remediate); failed questionnaire answers are included too with
+  their fix,
+- findings table + compliance mapping + `ask` section.
 
 ### 10. `ask` — answer what the scanner cannot see (SEC-ASK-N)
 
@@ -746,3 +824,47 @@ Rules:
 - Exit code 1 from `scan --wait --fail-on <sev>` means the gate failed
   (findings at/above that severity); exit 2 means usage/API error.
 ````
+
+### Auth profile (auto-detected on scan)
+
+After every scan the CLI/API **detect and store** which endpoint groups require
+authentication (universal: from observed `401/403` on GET/HEAD probes **and** the
+OpenAPI per-operation `security` — works even if the spec is incomplete). See it
+with `liveapisec sites --site SITE_ID`:
+
+```
+  auth schemes (from spec): HTTPBearer(http), DevApiKey(http)
+  auth requirements (from last scan):
+    - /api-specs: requires auth (25 auth / 0 public of 25)  [HTTPBearer]
+    - /developers: requires auth (35 auth / 0 public of 35)  [HTTPBearer, DevApiKey]
+    - /public: public (0 auth / 6 public of 6)
+  credentials configured: clerk, api_key
+```
+
+It also feeds the report as a coverage gap: an endpoint group that requires auth
+but has **no matching credential** was tested unauthenticated — so the results
+don't cover it. Add the right credential (or a per-identity scan) to test it for
+real.
+
+### Credentials per-prefix — mixed auth in one scan
+
+Some APIs expose **different auth mechanisms on different routes** (e.g. user
+JWT/Clerk on the core API, but machine `api_key` tokens on `/developers/*`). A
+single credential can't authenticate both. Bind a credential to a **path prefix**
+and the scanner picks the right one **per request** (longest prefix wins):
+
+```bash
+liveapisec credentials set --site SITE_ID --slot a \
+  --auth-type bearer --auth-token "$CLERK_JWT"          # default (all routes)
+liveapisec credentials set --site SITE_ID --slot devkey --path /developers \
+  --auth-type api_key --auth-token "$DEV_KEY" --auth-header X-API-Key
+
+liveapisec credentials --site SITE_ID
+#   - slot=a       bearer   prefix=(default)
+#   - slot=devkey  api_key  prefix=/developers
+liveapisec credentials rm --site SITE_ID --slot devkey
+```
+
+One `scan` now authenticates **both** groups; the auto **auth profile** confirms
+it (both shown as `public`/2xx instead of `requires auth`). If a group still
+shows `requires auth`, its credential is missing/wrong.
