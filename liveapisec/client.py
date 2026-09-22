@@ -120,6 +120,7 @@ class LiveAPISec:
         base_url: str,
         endpoints: list[dict[str, str]] | None = None,
         openapi_url: str | None = None,
+        spec: dict[str, Any] | None = None,
         project: str | None = None,
         auth: dict[str, Any] | None = None,
         site_id: str | None = None,
@@ -127,8 +128,14 @@ class LiveAPISec:
         access: str | None = None,
     ) -> dict[str, Any]:
         """Push a site (idempotent by name+base_url). Without `site_id` → POST (create/update),
-        with `site_id` → PUT (explicit update)."""
+        with `site_id` → PUT (explicit update).
+
+        `spec` (TODO 2.50) sends the FULL OpenAPI document (parameters, requestBody,
+        schemas, security) — used by `--spec-file` for localhost/private URLs.
+        """
         payload: dict[str, Any] = {"name": name, "base_url": base_url}
+        if spec is not None:
+            payload["spec"] = spec
         if endpoints:
             payload["endpoints"] = endpoints
         if openapi_url:
@@ -222,6 +229,33 @@ class LiveAPISec:
         """Delete a whole project (all its sites and their data)."""
         self._request("DELETE", f"/developers/projects/{project}")
 
+    # -- credentials per-prefix (TODO 2.50) ----------------------------------
+    def list_credentials(self, site_id: str) -> list[dict[str, Any]]:
+        """Masked credentials of a site (slot, path_prefix, auth_method)."""
+        return self._request("GET", f"/developers/sites/{site_id}/credentials")
+
+    def set_credential(
+        self, site_id: str, slot: str, auth: dict[str, Any], path_prefix: str | None = None
+    ) -> dict[str, Any]:
+        """Create/update a credential (optionally bound to a path prefix).
+
+        `auth` is the same shape as `push --auth-*` ({"type": ..., ...}).
+        """
+        payload: dict[str, Any] = {"slot": slot, "auth": auth}
+        if path_prefix is not None:
+            payload["path_prefix"] = path_prefix
+        return self._request(
+            "POST", f"/developers/sites/{site_id}/credentials", json=payload
+        )
+
+    def remove_credential(self, site_id: str, slot: str) -> dict[str, Any]:
+        """Remove a credential by slot (auth.type=none)."""
+        return self._request(
+            "POST",
+            f"/developers/sites/{site_id}/credentials",
+            json={"slot": slot, "auth": {"type": "none"}},
+        )
+
     # -- scans ----------------------------------------------------------------
     def trigger_scan(
         self,
@@ -279,21 +313,29 @@ class LiveAPISec:
     # -- hacker mode (TODO 3.6 / 3.6.1) --------------------------------------
     def trigger_hacker_scan(
         self, site_id: str, environment: str, goal: str | None = None,
-        tunnel: bool = False,
+        tunnel: bool = False, destructive: bool = False,
+        auth_b: dict[str, Any] | None = None, thorough: bool = False,
     ) -> dict[str, Any]:
         """Trigger an autonomous AI hacker-mode test (202) on a dev/staging env.
 
         Requires a verified domain for public targets; localhost / private IPs are
         exempt. Never runs on production. `goal` is an optional guided attack
         objective (TODO 3.6.2). `tunnel=True` routes requests through a connected
-        CLI (reverse tunnel) — for localhost/internal targets. Returns
-        {scan_id, status, environment}.
+        CLI (reverse tunnel) — for localhost/internal targets. `destructive=False`
+        (default) = READ-ONLY (only GET/HEAD/OPTIONS); `destructive=True` allows
+        state-changing methods (TODO 2.50). Returns {scan_id, status, environment}.
         """
         payload: dict[str, Any] = {"environment": environment}
         if goal:
             payload["goal"] = goal
         if tunnel:
             payload["tunnel"] = True
+        if destructive:
+            payload["destructive"] = True
+        if auth_b:
+            payload["auth_b"] = auth_b
+        if thorough:
+            payload["thorough"] = True
         return self._request(
             "POST",
             f"/developers/sites/{site_id}/hacker-scans",
