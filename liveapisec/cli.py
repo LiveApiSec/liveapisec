@@ -1339,37 +1339,36 @@ def _latest_ask_with_answers(client: LiveAPISec, site_id: str) -> dict[str, Any]
     return None
 
 
-# TODO 2.50: rekomendacje „jak naprawić” per kategoria findings (raport opisowy).
+# TODO 2.50: "how to fix" recommendations per finding category (descriptive report).
 _REMEDIATION: dict[str, str] = {
-    "bola": "Wymuś autoryzację na poziomie obiektu: sprawdzaj, że zalogowany podmiot ma dostęp do KONKRETNEGO id (nie tylko że jest zalogowany). Testuj dwoma tenantami — A musi dostać 403/404 na obiektach B.",
-    "broken_auth": "Wymagaj uwierzytelnienia na każdym niepublicznym endpoincie (deny by default); upewnij się, że guard jest realnie podpięty, a nie tylko zadeklarowany w specyfikacji.",
-    "rbac": "Ujednolic autoryzację między rolami: serwerowa macierz rola→uprawnienie, jednolite allow/deny, domyślnie odmawiaj przy braku reguły.",
-    "mass_assignment": "Whitelistuj pola zapisywalne (DTO/allowlist), żeby klient nie ustawił pól wewnętrznych (role, owner, id, created_at). Ignoruj nieznane klucze.",
-    "injection": "Używaj zapytań parametryzowanych / escapingu drivera; nigdy nie sklejaj wejścia do SQL/NoSQL/komend. Waliduj i odrzucaj nieoczekiwane wejście na granicy.",
-    "rate_limit": "Dodaj limity per-IP (i per-konto dla auth) z 429 + Retry-After; dla wrażliwych endpointów (login, reset, trigger skanu) użyj exponential backoff.",
-    "cors": "Nie odbijaj dowolnego Origin z credentials; jawna allowlist zaufanych originów i tylko potrzebne metody/nagłówki.",
-    "headers": "Dodaj nagłówki bezpieczeństwa: Strict-Transport-Security, X-Content-Type-Options: nosniff, Content-Security-Policy, X-Frame-Options, Referrer-Policy.",
-    "sensitive_params": "Nie umieszczaj sekretów/tokenów/PII w URL (query/path) — wyciekają przez logi, Referer i proxy. Użyj body/nagłówków; jeśli token musi być w URL, zrób go jednorazowym i krótkotrwałym.",
-    "shadow_api": "Zinwentaryzuj i usuń/monitoruj nieudokumentowane endpointy; wymagaj auth i limitów na admin/metrics/debug albo zablokuj je na brzegu.",
-    "jwt_weakness": "Przypnij algorytm podpisu po stronie serwera (odrzuć none/alg confusion), wymagaj signature+exp+iss, krótkie access-tokeny i walidacja na każdym żądaniu.",
-    "method_tampering": "Wymuszaj tę samą autoryzację dla wszystkich metod HTTP na zasobie; nie polegaj na tym, że klient odrzuci metodę.",
-    "info_disclosure": "Zwracaj generyczne błędy (bez stack trace/SQL/wersji); diagnostykę/debug ogranicz do sieci wewnętrznej.",
-    "tech_fingerprint": "Ogranicz banery wersji (Server, X-Powered-By, nagłówki frameworka) i nie ujawniaj wersji bibliotek.",
-    "api_versions": "Wycofaj przestarzałe wersje API lub obejmij je tą samą autoryzacją/limitami; nie eksponuj starych, niełata­nych wersji.",
-    "graphql": "Wymuś autoryzację na poziomie pól, wyłącz introspection na produkcji (jeśli zbędna) i dodaj limity głębokości/złożoności zapytań.",
-    "oauth": "Waliduj redirect_uri względem dokładnej allowlisty, wymagaj state/PKCE oraz krótkotrwałych, rotowanych tokenów.",
-    "ssrf": "Ogranicz pobieranie po stronie serwera do allowlisty hostów/schematów; blokuj prywatne/metadata IP; waliduj i re-resolvuj URL-e.",
-    "ai_probe": "Przejrzyj wynik sondy AI i zastosuj właściwą kontrolę dla tego endpointu.",
+    "bola": "Enforce object-level authorization: verify the logged-in principal has access to the SPECIFIC id (not just that they are logged in). Test with two tenants — A must get 403/404 on B's objects.",
+    "broken_auth": "Require authentication on every non-public endpoint (deny by default); make sure the guard is actually wired in, not just declared in the spec.",
+    "rbac": "Unify authorization across roles: a server-side role→permission matrix, uniform allow/deny, deny by default when no rule matches.",
+    "mass_assignment": "Whitelist writable fields (DTO/allowlist) so clients cannot set internal fields (role, owner, id, created_at). Ignore unknown keys.",
+    "injection": "Use parameterized queries / driver escaping; never concatenate input into SQL/NoSQL/commands. Validate and reject unexpected input at the boundary.",
+    "rate_limit": "Add per-IP limits (and per-account for auth) with 429 + Retry-After; use exponential backoff for sensitive endpoints (login, reset, scan trigger).",
+    "cors": "Do not reflect arbitrary Origins with credentials; keep an explicit allowlist of trusted origins and only the needed methods/headers.",
+    "headers": "Add security headers: Strict-Transport-Security, X-Content-Type-Options: nosniff, Content-Security-Policy, X-Frame-Options, Referrer-Policy.",
+    "sensitive_params": "Do not put secrets/tokens/PII in URLs (query/path) — they leak via logs, Referer and proxies. Use body/headers; if a token must be in the URL, make it single-use and short-lived.",
+    "shadow_api": "Inventory and remove/monitor undocumented endpoints; require auth and limits on admin/metrics/debug or block them at the edge.",
+    "jwt_weakness": "Pin the signature algorithm server-side (reject none/alg confusion), require signature+exp+iss, short access tokens and validation on every request.",
+    "method_tampering": "Enforce the same authorization for all HTTP methods on a resource; do not rely on the client rejecting a method.",
+    "info_disclosure": "Return generic errors (no stack traces/SQL/versions); restrict diagnostics/debug to the internal network.",
+    "tech_fingerprint": "Reduce version banners (Server, X-Powered-By, framework headers) and do not expose library versions.",
+    "api_versions": "Retire outdated API versions or cover them with the same auth/limits; do not expose old, unpatched versions.",
+    "graphql": "Enforce field-level authorization, disable introspection in production (if unneeded) and add query depth/complexity limits.",
+    "oauth": "Validate redirect_uri against an exact allowlist, require state/PKCE plus short-lived, rotated tokens.",
+    "ssrf": "Restrict server-side fetching to an allowlist of hosts/schemes; block private/metadata IPs; validate and re-resolve URLs.",
+    "ai_probe": "Review the AI probe result and apply the appropriate control for that endpoint.",
 }
 
-
 def _finding_fix(finding: dict[str, Any]) -> str:
-    """Rekomendacja naprawy dla findings (mapa kategorii, fallback na opis)."""
+    """Fix recommendation for a finding (category map, fallback to description)."""
     cat = str(finding.get("category") or "").lower()
     return (
         _REMEDIATION.get(cat)
         or str(finding.get("description") or "").strip()
-        or "Przejrzyj finding i zastosuj właściwą kontrolę."
+        or "Review the finding and apply the appropriate control."
     )
 
 
@@ -1388,7 +1387,7 @@ def _md_risk(by_sev: dict[str, Any]) -> str:
 def _md_improvements(
     findings: list[dict[str, Any]], failed_ask: list[dict[str, Any]] | None
 ) -> list[str]:
-    """Sekcja „Points to improve” — opisowo: co, gdzie, dlaczego i jak naprawić."""
+    """"Points to improve" section — descriptive: what, where, why and how to fix."""
     order = {s: i for i, s in enumerate(_SEV)}
     blocks: list[str] = []
     for f in sorted(
