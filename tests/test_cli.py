@@ -39,8 +39,8 @@ def test_severity_rank() -> None:
     assert severity_rank("bogus") == 5
 
 
-# --- create_site -------------------------------------------------------------
-def test_create_site_posts_payload_and_auth_header() -> None:
+# --- create_project -------------------------------------------------------------
+def test_create_project_posts_payload_and_auth_header() -> None:
     captured: dict = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -51,7 +51,7 @@ def test_create_site_posts_payload_and_auth_header() -> None:
         return httpx.Response(
             201,
             json={
-                "site_id": "65f000000000000000000001",
+                "project_id": "65f000000000000000000001",
                 "name": "my-api",
                 "base_url": "https://api.example.com",
                 "endpoints_count": 2,
@@ -60,33 +60,33 @@ def test_create_site_posts_payload_and_auth_header() -> None:
         )
 
     api = _client(handler)
-    site = api.create_site(
+    site = api.create_project(
         name="my-api",
         base_url="https://api.example.com",
         endpoints=[{"method": "GET", "path": "/users"}, {"method": "POST", "path": "/payments"}],
         auth={"type": "jwt", "token": "eyJ.secret"},
     )
     assert captured["method"] == "POST"
-    assert captured["url"].endswith("/developers/sites")
+    assert captured["url"].endswith("/developers/projects")
     assert captured["auth"] == "Bearer las_dev_test"
     assert captured["body"]["name"] == "my-api"
     assert captured["body"]["auth"]["token"] == "eyJ.secret"
-    assert site["site_id"] == "65f000000000000000000001"
+    assert site["project_id"] == "65f000000000000000000001"
 
 
-def test_create_site_with_existing_id_uses_put() -> None:
+def test_create_project_with_existing_id_uses_put() -> None:
     captured: dict = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
         captured["method"] = request.method
-        return httpx.Response(200, json={"site_id": "65fabc", "endpoints_count": 1, "auth": "none"})
+        return httpx.Response(200, json={"project_id": "65fabc", "endpoints_count": 1, "auth": "none"})
 
     api = _client(handler)
-    api.create_site(
+    api.create_project(
         name="x",
         base_url="https://x.test",
         endpoints=[{"method": "GET", "path": "/"}],
-        site_id="65fabc",
+        project_id="65fabc",
     )
     assert captured["method"] == "PUT"
 
@@ -97,7 +97,7 @@ def test_api_error_raises_liveapisecerror() -> None:
 
     api = _client(handler)
     with pytest.raises(LiveAPISecError) as exc:
-        api.create_site("x", "https://x.test", endpoints=[{"method": "GET", "path": "/"}])
+        api.create_project("x", "https://x.test", endpoints=[{"method": "GET", "path": "/"}])
     assert exc.value.status == 401
     assert "Unauthorized" in str(exc.value)
 
@@ -106,7 +106,7 @@ def test_missing_api_key(monkeypatch) -> None:
     monkeypatch.delenv("LIVEAPISEC_API_KEY", raising=False)
     api = LiveAPISec(api_url="https://x.test", api_key=None)
     with pytest.raises(LiveAPISecError) as exc:
-        api.get_site("65fabc")
+        api.get_project("65fabc")
     assert "Missing API key" in str(exc.value)
 
 
@@ -143,7 +143,7 @@ def test_trigger_hacker_scan() -> None:
     scan = api.trigger_hacker_scan("65fabc", "development")
     assert scan["scan_id"] == "hack123"
     assert scan["mode"] == "hacker"
-    assert captured["url"].endswith("/developers/sites/65fabc/hacker-scans")
+    assert captured["url"].endswith("/developers/projects/65fabc/hacker-scans")
     assert captured["body"] == {"environment": "development"}
 
 
@@ -227,9 +227,9 @@ class _StubClient:
     def __init__(self) -> None:
         self.sites: list[dict] = []
 
-    def create_site(self, **kw):
+    def create_project(self, **kw):
         self.sites.append(kw)
-        return {"site_id": "65faaa", "name": kw["name"], "endpoints_count": 1, "auth": "none"}
+        return {"project_id": "65faaa", "name": kw["name"], "endpoints_count": 1, "auth": "none"}
 
 
 def test_cli_push_builds_payload(capsys) -> None:
@@ -241,7 +241,7 @@ def test_cli_push_builds_payload(capsys) -> None:
         project = None
         endpoint: list = [{"method": "GET", "path": "/users"}]  # noqa: RUF012 (test stub)
         openapi_url = None
-        site = None
+        project = None
         auth_type = "none"
         auth_token = None
         auth_cookie = None
@@ -255,7 +255,52 @@ def test_cli_push_builds_payload(capsys) -> None:
     assert _cmd_push(stub, Args()) == 0
     out = capsys.readouterr().out
     assert "65faaa" in out
-    assert "export SITE_ID=65faaa" in out
+    assert "export PROJECT_ID=65faaa" in out
+
+
+def test_push_project_without_name_fills_from_existing(capsys) -> None:
+    """Regresja: `push --project <id>` bez `--name`/`--base-url` → PUT z pustym
+    `name` i mylący 422. Teraz brakujące pola są dopełniane z istniejącego projektu.
+    """
+    captured: dict = {}
+
+    class Client:
+        def get_project(self, project_id):
+            return {
+                "project_id": project_id,
+                "name": "existing-name",
+                "base_url": "https://old.test",
+            }
+
+        def create_project(self, **kw):
+            captured.update(kw)
+            return {
+                "project_id": "65fabc",
+                "name": kw["name"],
+                "endpoints_count": 1,
+                "auth": "none",
+            }
+
+    class Args:
+        name = None
+        base_url = None
+        project = "65fabc"
+        endpoint: list = [{"method": "GET", "path": "/x"}]  # noqa: RUF012 (test stub)
+        openapi_url = None
+        auth_type = "none"
+        auth_token = None
+        auth_cookie = None
+        auth_header = "X-API-Key"
+        auth_token_url = None
+        auth_client_id = None
+        auth_client_secret = None
+        verify = False
+        json = False
+
+    assert _cmd_push(Client(), Args()) == 0
+    assert captured["name"] == "existing-name"
+    assert captured["base_url"] == "https://old.test"
+    capsys.readouterr()
 
 
 def test_cli_push_requires_endpoint(capsys) -> None:
@@ -265,7 +310,7 @@ def test_cli_push_requires_endpoint(capsys) -> None:
         project = None
         endpoint: list = []  # noqa: RUF012 (test stub)
         openapi_url = None
-        site = None
+        project = None
         verify = False
         json = False
 
@@ -279,10 +324,10 @@ def test_cli_push_many_endpoints_sent_and_summarized(capsys) -> None:
     captured: dict = {}
 
     class Client:
-        def create_site(self, **kw):
+        def create_project(self, **kw):
             captured["endpoints"] = kw["endpoints"]
             return {
-                "site_id": "65fbig",
+                "project_id": "65fbig",
                 "name": kw["name"],
                 "endpoints_count": len(kw["endpoints"]),
                 "auth": "none",
@@ -296,7 +341,7 @@ def test_cli_push_many_endpoints_sent_and_summarized(capsys) -> None:
             {"method": "GET", "path": f"/users/{i}"} for i in range(1500)
         ]
         openapi_url = None
-        site = None
+        project = None
         auth_type = "none"
         auth_token = None
         auth_cookie = None
@@ -324,17 +369,17 @@ def test_print_endpoints_summarizes_large_list(capsys) -> None:
     assert "90 more" in out  # 100 - 10
 
 
-# --- interactive pickers (project / site) ------------------------------------
+# --- interactive picker (project) --------------------------------------------
 def test_pick_project_existing(monkeypatch, capsys) -> None:
     from liveapisec.cli import _pick_project
 
-    monkeypatch.setattr("builtins.input", lambda _p: "1")
-    sites = [
-        {"site_id": "a", "name": "api-a", "project": "svc"},
-        {"site_id": "b", "name": "api-b", "project": "svc"},
-        {"site_id": "c", "name": "api-c", "project": "mobile"},
+    monkeypatch.setattr("builtins.input", lambda _p: "2")
+    projects = [
+        {"project_id": "a", "name": "api-a", "base_url": "https://a"},
+        {"project_id": "b", "name": "api-b", "base_url": "https://b"},
     ]
-    assert _pick_project(sites) == "mobile"  # posortowane: mobile, svc → 1 = mobile
+    picked = _pick_project(projects)
+    assert picked and picked["project_id"] == "b"
     out = capsys.readouterr().out
     assert "Pick a project" in out
     assert "create new project" in out
@@ -343,52 +388,32 @@ def test_pick_project_existing(monkeypatch, capsys) -> None:
 def test_pick_project_new(monkeypatch, capsys) -> None:
     from liveapisec.cli import _pick_project
 
-    monkeypatch.setattr("builtins.input", lambda _p: "brand-new")
-    assert _pick_project([]) == "brand-new"  # brak projektów → typuje nazwę
-
-
-def test_pick_site_existing(monkeypatch, capsys) -> None:
-    from liveapisec.cli import _pick_site
-
-    monkeypatch.setattr("builtins.input", lambda _p: "2")
-    sites = [
-        {"site_id": "a", "name": "api-a", "project": "svc", "base_url": "https://a"},
-        {"site_id": "b", "name": "api-b", "project": "svc", "base_url": "https://b"},
-    ]
-    picked = _pick_site(sites, "svc")
-    assert picked and picked["site_id"] == "b"
-
-
-def test_pick_site_new(monkeypatch, capsys) -> None:
-    from liveapisec.cli import _pick_site
-
     monkeypatch.setattr("builtins.input", lambda _p: "9")  # spoza listy → nowy
-    sites = [{"site_id": "a", "name": "api-a", "project": "svc", "base_url": "https://a"}]
-    assert _pick_site(sites, "svc") is None
+    projects = [{"project_id": "a", "name": "api-a", "base_url": "https://a"}]
+    assert _pick_project(projects) is None
 
 
-def test_list_sites_sdk() -> None:
+def test_list_projects_sdk() -> None:
     captured: dict = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
         captured["url"] = str(request.url)
-        return httpx.Response(200, json=[{"site_id": "a", "project": "svc"}])
+        return httpx.Response(200, json=[{"project_id": "a", "project": "svc"}])
 
-    sites = _client(handler).list_sites()
-    assert captured["url"].endswith("/developers/sites")
-    assert sites == [{"site_id": "a", "project": "svc"}]
+    sites = _client(handler).list_projects()
+    assert captured["url"].endswith("/developers/projects")
+    assert sites == [{"project_id": "a", "project": "svc"}]
 
 
-def test_cli_projects_groups_and_shows_last_scan(capsys) -> None:
+def test_cli_projects_shows_last_scan(capsys) -> None:
     from liveapisec.cli import _cmd_projects
 
     class Client:
-        def list_sites(self):
+        def list_projects(self):
             return [
                 {
-                    "site_id": "a",
+                    "project_id": "a",
                     "name": "api-a",
-                    "project": "svc",
                     "base_url": "https://a.test",
                     "last_scan": {
                         "status": "completed",
@@ -398,16 +423,14 @@ def test_cli_projects_groups_and_shows_last_scan(capsys) -> None:
                     },
                 },
                 {
-                    "site_id": "b",
+                    "project_id": "b",
                     "name": "api-b",
-                    "project": "svc",
                     "base_url": "https://b.test",
                     "last_scan": {"status": "failed"},
                 },
                 {
-                    "site_id": "c",
+                    "project_id": "c",
                     "name": "api-c",
-                    "project": "mobile",
                     "base_url": "https://c.test",
                     "last_scan": None,
                 },
@@ -419,7 +442,6 @@ def test_cli_projects_groups_and_shows_last_scan(capsys) -> None:
 
     assert _cmd_projects(Client(), Args()) == 0
     out = capsys.readouterr().out
-    assert "svc" in out and "mobile" in out
     assert "api-a" in out and "api-b" in out and "api-c" in out
     assert "completed" in out
     assert "42 tests" in out
@@ -429,17 +451,17 @@ def test_cli_projects_groups_and_shows_last_scan(capsys) -> None:
     assert "no test yet" in out
 
 
-def test_cli_projects_json_and_filter(capsys) -> None:
+def test_cli_projects_json(capsys) -> None:
     from liveapisec.cli import _cmd_projects
 
-    sites = [
-        {"site_id": "a", "project": "svc", "last_scan": None},
-        {"site_id": "b", "project": "mobile", "last_scan": None},
+    projects = [
+        {"project_id": "a", "name": "api-a", "last_scan": None},
+        {"project_id": "b", "name": "api-b", "last_scan": None},
     ]
 
     class Client:
-        def list_sites(self):
-            return sites
+        def list_projects(self):
+            return projects
 
     class Args:
         project = None
@@ -448,16 +470,7 @@ def test_cli_projects_json_and_filter(capsys) -> None:
     assert _cmd_projects(Client(), Args()) == 0
     import json as _json
 
-    assert _json.loads(capsys.readouterr().out) == sites
-
-    class Args:
-        project = "mobile"
-        json = False
-
-    assert _cmd_projects(Client(), Args()) == 0
-    out = capsys.readouterr().out
-    assert "mobile" in out
-    assert "svc" not in out
+    assert _json.loads(capsys.readouterr().out) == projects
 
 
 def test_push_interactive_picks_existing_site(monkeypatch, capsys) -> None:
@@ -473,22 +486,22 @@ def test_push_interactive_picks_existing_site(monkeypatch, capsys) -> None:
     monkeypatch.setattr("builtins.input", lambda _p: "1")  # project=1, site=1
 
     sites = [
-        {"site_id": "siteA", "name": "api-a", "project": "svc", "base_url": "https://a.test"},
+        {"project_id": "siteA", "name": "api-a", "project": "svc", "base_url": "https://a.test"},
     ]
     calls: dict = {}
 
     class Client:
-        def list_sites(self):
+        def list_projects(self):
             return sites
 
-        def create_site(self, **kw):
+        def create_project(self, **kw):
             calls.update(kw)
             return {
-                "site_id": kw.get("site_id") or "new",
+                "project_id": kw.get("project_id") or "new",
                 "name": "x",
                 "endpoints_count": 1,
                 "auth": "none",
-                "updated": bool(kw.get("site_id")),
+                "updated": bool(kw.get("project_id")),
             }
 
     class Args:
@@ -497,7 +510,7 @@ def test_push_interactive_picks_existing_site(monkeypatch, capsys) -> None:
         project = None
         endpoint: list = [{"method": "GET", "path": "/users"}]  # noqa: RUF012
         openapi_url = None
-        site = None
+        project = None
         auth_type = "none"
         auth_token = None
         auth_cookie = None
@@ -509,8 +522,8 @@ def test_push_interactive_picks_existing_site(monkeypatch, capsys) -> None:
         json = False
 
     assert _cmd_push(Client(), Args()) == 0
-    # wybrał istniejący site → PUT (site_id), name/base_url z istniejącego
-    assert calls["site_id"] == "siteA"
+    # wybrał istniejący site → PUT (project_id), name/base_url z istniejącego
+    assert calls["project_id"] == "siteA"
     assert calls["name"] == "api-a"
     assert calls["base_url"] == "https://a.test"
 
@@ -521,11 +534,11 @@ class _GateClient:
         self.findings = findings
 
     def trigger_scan(
-        self, site_id, branch=None, commit=None, tunnel=False, auth_b=None, environment=None
+        self, project_id, branch=None, commit=None, tunnel=False, auth_b=None, environment=None
     ):
         return {"scan_id": "s1", "status": "queued"}
 
-    def wait_for_scan(self, site_id, scan_id):
+    def wait_for_scan(self, project_id, scan_id):
         return {
             "scan_id": "s1",
             "status": "completed",
@@ -536,7 +549,7 @@ class _GateClient:
 
 def test_cli_scan_gate_fails_on_high(capsys) -> None:
     class Args:
-        site = "65f"
+        project = "65f"
         branch = None
         commit = None
         wait = True
@@ -552,7 +565,7 @@ def test_cli_scan_gate_fails_on_high(capsys) -> None:
 
 def test_cli_scan_gate_passes_on_info(capsys) -> None:
     class Args:
-        site = "65f"
+        project = "65f"
         branch = None
         commit = None
         wait = True
@@ -568,7 +581,7 @@ def test_cli_scan_gate_passes_on_info(capsys) -> None:
 
 def test_cli_findings(capsys) -> None:
     class Args:
-        site = "65f"
+        project = "65f"
         scan = "s1"
         json = False
 
@@ -598,7 +611,7 @@ def test_cli_scans_lists_history_and_summarizes(capsys) -> None:
             ]
 
     class Args:
-        site = "65f"
+        project = "65f"
         limit = 20
         json = False
 
@@ -611,7 +624,7 @@ def test_cli_scans_lists_history_and_summarizes(capsys) -> None:
     assert "status=failed" in out
 
     class Args:
-        site = "65f"
+        project = "65f"
         limit = 1
         json = False
 
@@ -620,7 +633,7 @@ def test_cli_scans_lists_history_and_summarizes(capsys) -> None:
     assert "more (use --json for all)" in out
 
     class Args:
-        site = "65f"
+        project = "65f"
         limit = 20
         json = True
 
@@ -790,7 +803,7 @@ def test_cli_certificate_prints_snippet(capsys) -> None:
         type = "badge"
         scope = "org"
         project = None
-        site = None
+        project = None
 
     assert _cmd_certificate(Client(), Args()) == 0
     out = capsys.readouterr().out
@@ -865,8 +878,8 @@ def test_cmd_connect_forwards_one_request(monkeypatch, capsys) -> None:
     ]
 
     class Client:
-        def open_tunnel(self, site_id):
-            return {"tunnel_id": "t1", "site_id": site_id, "base_url": "http://localhost:8000"}
+        def open_tunnel(self, project_id):
+            return {"tunnel_id": "t1", "project_id": project_id, "base_url": "http://localhost:8000"}
 
         def tunnel_next(self, tunnel_id, timeout=25):
             if seq:
@@ -880,7 +893,7 @@ def test_cmd_connect_forwards_one_request(monkeypatch, capsys) -> None:
             got["closed"] = True
 
     class Args:
-        site = "s1"
+        project = "s1"
         poll_timeout = 1
 
     assert _cmd_connect(Client(), Args()) == 0
@@ -890,14 +903,14 @@ def test_cmd_connect_forwards_one_request(monkeypatch, capsys) -> None:
     assert "localhost:8000" in got["result"]["headers"].get("host", "") or True
 
 
-def test_create_site_sends_schedule_and_access() -> None:
+def test_create_project_sends_schedule_and_access() -> None:
     captured: dict = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
         captured["body"] = json.loads(request.content)
-        return httpx.Response(201, json={"site_id": "s1", "access": "internal"})
+        return httpx.Response(201, json={"project_id": "s1", "access": "internal"})
 
-    _client(handler).create_site(
+    _client(handler).create_project(
         "n",
         "http://10.0.0.5:8000",
         endpoints=[{"method": "GET", "path": "/x"}],
@@ -908,14 +921,14 @@ def test_create_site_sends_schedule_and_access() -> None:
     assert captured["body"]["schedule"] == "off"
 
 
-def test_create_site_omits_empty_schedule_access() -> None:
+def test_create_project_omits_empty_schedule_access() -> None:
     captured: dict = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
         captured["body"] = json.loads(request.content)
-        return httpx.Response(201, json={"site_id": "s1"})
+        return httpx.Response(201, json={"project_id": "s1"})
 
-    _client(handler).create_site("n", "https://api.test", endpoints=[{"method": "GET", "path": "/x"}])
+    _client(handler).create_project("n", "https://api.test", endpoints=[{"method": "GET", "path": "/x"}])
     assert "access" not in captured["body"]
     assert "schedule" not in captured["body"]
 
@@ -936,7 +949,7 @@ def test_cli_verdict_fail_exit_1(capsys) -> None:
     from liveapisec.cli import _cmd_verdict
 
     class Args:
-        site = "s1"; scan = "cur"; baseline = "base"; fail_on = "high"; json = False
+        project = "s1"; scan = "cur"; baseline = "base"; fail_on = "high"; json = False
 
     class Client:
         def get_verdict(self, site, scan, baseline, fail_on="high"):
@@ -952,7 +965,7 @@ def test_cli_verdict_pass_exit_0(capsys) -> None:
     from liveapisec.cli import _cmd_verdict
 
     class Args:
-        site = "s1"; scan = "cur"; baseline = "base"; fail_on = "high"; json = False
+        project = "s1"; scan = "cur"; baseline = "base"; fail_on = "high"; json = False
 
     class Client:
         def get_verdict(self, site, scan, baseline, fail_on="high"):
@@ -965,7 +978,7 @@ def test_cli_compliance(capsys) -> None:
     from liveapisec.cli import _cmd_compliance
 
     class Args:
-        site = "s1"; scan = "cur"; json = False
+        project = "s1"; scan = "cur"; json = False
 
     class Client:
         def get_compliance(self, site, scan):
@@ -988,7 +1001,7 @@ def test_cli_report_saves_file(tmp_path, capsys) -> None:
     out = tmp_path / "r.json"
 
     class Args:
-        site = "s1"; scan = "cur"; json = False; output = str(out)
+        project = "s1"; scan = "cur"; json = False; output = str(out)
 
     class Client:
         def get_report(self, site, scan):
@@ -1004,8 +1017,8 @@ def test_cli_certificate_pdf(tmp_path, capsys) -> None:
     out = tmp_path / "c.pdf"
 
     class Args:
-        site = "s1"; scan = "cur"; pdf = True; variant = "full"; output = str(out)
-        json = False; scope = "org"; project = None; type = "badge"
+        project = "s1"; scan = "cur"; pdf = True; variant = "full"; output = str(out)
+        json = False; scope = "org"; type = "badge"
 
     class Client:
         def download_certificate_pdf(self, site, scan, variant="full"):
@@ -1065,7 +1078,7 @@ def _all_client(**kw):
 
 def _all_args(tmp_path, **kw):
     class Args:
-        site = "s1"
+        project = "s1"
         baseline = kw.get("baseline")
         fail_on = "high"
         branch = None; commit = None; tunnel = False
@@ -1127,7 +1140,7 @@ def test_cli_report_md(tmp_path, capsys) -> None:
     out = tmp_path / "r.md"
 
     class Args:
-        site = "s1"; scan = "s9"; json = False; output = str(out); format = "md"
+        project = "s1"; scan = "s9"; json = False; output = str(out); format = "md"
 
     assert _cmd_report(_md_client(), Args()) == 0
     text = out.read_text()
@@ -1145,7 +1158,7 @@ def test_cli_all_md_report_with_verdict(tmp_path, capsys) -> None:
     base = _all_client()
 
     class Args:
-        site = "s1"
+        project = "s1"
         baseline = None
         fail_on = "high"
         branch = None; commit = None; tunnel = False
@@ -1226,7 +1239,7 @@ def test_trigger_scan_sends_environment() -> None:
 def test_scan_parser_has_url_flag() -> None:
     from liveapisec.cli import build_parser
 
-    args = build_parser().parse_args(["scan", "--site", "s1", "--url", "staging"])
+    args = build_parser().parse_args(["scan", "--project", "s1", "--url", "staging"])
     assert args.url == "staging"
 
 
@@ -1234,7 +1247,7 @@ def test_scan_parser_has_auth_b_flags() -> None:
     from liveapisec.cli import build_parser
 
     for cmd in ("scan", "all"):
-        args = build_parser().parse_args([cmd, "--site", "s1", "--auth-token-b", "t"])
+        args = build_parser().parse_args([cmd, "--project", "s1", "--auth-token-b", "t"])
         assert args.auth_token_b == "t"
         assert args.auth_type_b == "bearer"
 
@@ -1276,7 +1289,7 @@ def test_cli_ask_new(capsys) -> None:
     from liveapisec.cli import _cmd_ask_new
 
     class Args:
-        site = "s1"; no_ai = False; json = False
+        project = "s1"; no_ai = False; json = False
 
     assert _cmd_ask_new(_ask_client(), Args()) == 0
     assert "ask session created: sess1 (200 questions)" in capsys.readouterr().out
@@ -1286,7 +1299,7 @@ def test_cli_ask_sessions(capsys) -> None:
     from liveapisec.cli import _cmd_ask_sessions
 
     class Args:
-        site = "s1"; json = False
+        project = "s1"; json = False
 
     assert _cmd_ask_sessions(_ask_client(), Args()) == 0
     out = capsys.readouterr().out
@@ -1384,7 +1397,7 @@ def test_cli_ask_followup_parser() -> None:
 # --- TODO 2.50: wersje per-URL + publiczny certyfikat per-URL ---------------
 
 
-def test_set_site_certificate_url_sdk() -> None:
+def test_set_project_certificate_url_sdk() -> None:
     captured: dict = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -1393,9 +1406,9 @@ def test_set_site_certificate_url_sdk() -> None:
         captured["body"] = json.loads(request.content)
         return httpx.Response(200, json={"environment": "staging"})
 
-    _client(handler).set_site_certificate_url("s1", "staging")
+    _client(handler).set_project_certificate_url("s1", "staging")
     assert captured["method"] == "PATCH"
-    assert captured["path"].endswith("/developers/sites/s1/certificate")
+    assert captured["path"].endswith("/developers/projects/s1/certificate")
     assert captured["body"]["environment"] == "staging"
 
 
@@ -1405,20 +1418,20 @@ def test_cli_certificate_url_flag(capsys) -> None:
     calls: dict = {}
 
     class Client:
-        def set_site_certificate_url(self, site, environment):
+        def set_project_certificate_url(self, site, environment):
             calls["site"] = site
             calls["env"] = environment
             return {}
 
         def get_certificate(self, scope="org", project=None, site=None):
-            return {"scope": "site", "slug": "s", "trust_url": "u", "embeds": {}}
+            return {"scope": "project", "slug": "s", "trust_url": "u", "embeds": {}}
 
     class Args:
         json = False
         type = "badge"
-        scope = "site"
+        scope = "project"
         project = None
-        site = "s1"
+        project = "s1"
         url = "staging"
         pdf = False
         scan = None
@@ -1432,17 +1445,17 @@ def test_cli_certificate_url_flag(capsys) -> None:
 def test_certificate_parser_has_url_flag() -> None:
     from liveapisec.cli import build_parser
 
-    args = build_parser().parse_args(["certificate", "--site", "s1", "--url", "staging"])
+    args = build_parser().parse_args(["certificate", "--project", "s1", "--url", "staging"])
     assert args.url == "staging"
 
 
 def test_cli_sites_shows_url_versions(capsys) -> None:
-    from liveapisec.cli import _cmd_sites
+    from liveapisec.cli import _cmd_project
 
     class Client:
-        def get_site(self, site):
+        def get_project(self, site):
             return {
-                "site_id": "s1",
+                "project_id": "s1",
                 "name": "api",
                 "endpoints_count": 1,
                 "base_url": "https://x",
@@ -1466,9 +1479,9 @@ def test_cli_sites_shows_url_versions(capsys) -> None:
 
     class Args:
         json = False
-        site = "s1"
+        project = "s1"
 
-    assert _cmd_sites(Client(), Args()) == 0
+    assert _cmd_project(Client(), Args()) == 0
     out = capsys.readouterr().out
     assert "prod: https://p  [version=1.2.3]" in out
     assert "dev: https://d  [schedule=6h]" in out
@@ -1500,7 +1513,7 @@ def test_cli_versions_lists_and_marks(capsys) -> None:
 
     class Args:
         json = False
-        site = "s1"
+        project = "s1"
 
     assert _cmd_versions(Client(), Args()) == 0
     out = capsys.readouterr().out
@@ -1511,45 +1524,32 @@ def test_cli_versions_lists_and_marks(capsys) -> None:
 def test_versions_parser() -> None:
     from liveapisec.cli import build_parser
 
-    args = build_parser().parse_args(["versions", "--site", "s1"])
-    assert args.site == "s1"
+    args = build_parser().parse_args(["versions", "--project", "s1"])
+    assert args.project == "s1"
 
 
-def test_cli_delete_site_and_project(capsys) -> None:
+def test_cli_delete_project(capsys) -> None:
     from liveapisec.cli import _cmd_delete
 
     calls: dict = {}
 
     class Client:
-        def delete_site(self, site):
-            calls["site"] = site
-
         def delete_project(self, project):
             calls["project"] = project
 
     class A:
-        site = "s1"
-        project = None
+        project = "s1"
         yes = True
         json = False
 
     class B:
-        site = None
-        project = "acme"
-        yes = True
-        json = False
-
-    class C:
-        site = None
         project = None
         yes = True
         json = False
 
     assert _cmd_delete(Client(), A()) == 0
-    assert calls["site"] == "s1"
-    assert _cmd_delete(Client(), B()) == 0
-    assert calls["project"] == "acme"
-    assert _cmd_delete(Client(), C()) == 2  # trzeba podać dokładnie jedno
+    assert calls["project"] == "s1"
+    assert _cmd_delete(Client(), B()) == 2  # --project jest wymagane
 
 
 def test_push_spec_file_sends_full_spec(tmp_path) -> None:
@@ -1574,9 +1574,9 @@ def test_push_spec_file_sends_full_spec(tmp_path) -> None:
     calls: dict = {}
 
     class Client:
-        def create_site(self, **kw):
+        def create_project(self, **kw):
             calls.update(kw)
-            return {"site_id": "s1", "name": kw["name"], "endpoints_count": 1, "auth": "none"}
+            return {"project_id": "s1", "name": kw["name"], "endpoints_count": 1, "auth": "none"}
 
     class Args:
         spec_file = str(p)
@@ -1585,7 +1585,7 @@ def test_push_spec_file_sends_full_spec(tmp_path) -> None:
         project = None
         endpoint: list = []  # noqa: RUF012
         openapi_url = None
-        site = None
+        project = None
         auth_type = "none"
         auth_token = None
         auth_cookie = None
@@ -1678,10 +1678,10 @@ def test_print_scan_summary(capsys) -> None:
 def test_hacker_parser_has_destructive_flag() -> None:
     from liveapisec.cli import build_parser
 
-    args = build_parser().parse_args(["hacker", "--site", "s1", "--env", "dev"])
+    args = build_parser().parse_args(["hacker", "--project", "s1", "--env", "dev"])
     assert args.destructive is False
     args2 = build_parser().parse_args(
-        ["hacker", "--site", "s1", "--env", "dev", "--destructive"]
+        ["hacker", "--project", "s1", "--env", "dev", "--destructive"]
     )
     assert args2.destructive is True
 
@@ -1700,9 +1700,9 @@ def test_trigger_hacker_scan_sends_destructive() -> None:
 def test_hacker_parser_has_thorough_flag() -> None:
     from liveapisec.cli import build_parser
 
-    args = build_parser().parse_args(["hacker", "--site", "s1", "--env", "dev"])
+    args = build_parser().parse_args(["hacker", "--project", "s1", "--env", "dev"])
     assert args.thorough is False
-    args2 = build_parser().parse_args(["hacker", "--site", "s1", "--env", "dev", "--thorough"])
+    args2 = build_parser().parse_args(["hacker", "--project", "s1", "--env", "dev", "--thorough"])
     assert args2.thorough is True
 
 
@@ -1736,3 +1736,23 @@ def test_clerk_auth_parser_and_payload() -> None:
     assert auth["clerk_user_id"] == "user_1"
     assert auth["clerk_org_id"] == "org_1"
     assert _validate_auth(args, auth) is None
+
+
+def test_cli_version_flag_and_sources_in_sync(capsys) -> None:
+    """`--version` działa, a wersja jest spójna: __init__ == _version == pyproject."""
+    import re
+    from pathlib import Path
+
+    import liveapisec
+    from liveapisec._version import __version__
+
+    assert liveapisec.__version__ == __version__
+
+    pyproject = Path(__file__).resolve().parents[1] / "pyproject.toml"
+    m = re.search(r'^version\s*=\s*"([^"]+)"', pyproject.read_text(), re.MULTILINE)
+    assert m and m.group(1) == __version__, "pyproject.toml version out of sync"
+
+    with pytest.raises(SystemExit) as exc:
+        main(["--version"])
+    assert exc.value.code == 0
+    assert capsys.readouterr().out.strip() == f"liveapisec {__version__}"

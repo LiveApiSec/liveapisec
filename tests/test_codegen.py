@@ -567,7 +567,7 @@ def test_push_code_pushes_site(tmp_path, capsys) -> None:
         return httpx.Response(
             201,
             json={
-                "site_id": "65f000000000000000000001",
+                "project_id": "65f000000000000000000001",
                 "name": "my-api",
                 "base_url": "https://api.example.com",
                 "endpoints_count": 1,
@@ -582,7 +582,6 @@ def test_push_code_pushes_site(tmp_path, capsys) -> None:
         "name": "my-api",
         "base_url": "https://api.example.com",
         "project": None,
-        "site": None,
         "dry_run": False,
         "verify": False,
         "json": False,
@@ -597,9 +596,9 @@ def test_push_code_pushes_site(tmp_path, capsys) -> None:
     code = _cmd_push_code(_client(handler), type("Args", (), args)())
     out = capsys.readouterr().out
     assert code == 0
-    assert "developers/sites" in captured["url"]
+    assert "developers/projects" in captured["url"]
     assert captured["body"]["endpoints"] == [{"method": "GET", "path": "/x"}]
-    assert "export SITE_ID=65f000000000000000000001" in out
+    assert "export PROJECT_ID=65f000000000000000000001" in out
 
 
 def test_push_code_requires_name_and_base_url(tmp_path, capsys) -> None:

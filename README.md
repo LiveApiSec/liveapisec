@@ -82,6 +82,7 @@ pip install "liveapisec @ git+https://github.com/LiveApiSec/liveapisec.git"
 Verify:
 
 ```bash
+liveapisec --version     # e.g. liveapisec 0.1.39
 liveapisec --help
 ```
 
@@ -133,28 +134,22 @@ liveapisec config --clear  # remove the saved config file
 
 ## Commands
 
-### Interactive mode (project + site picker)
+### Interactive mode (project picker)
 
-When you run `push` / `scan-code` in a terminal and **omit `--project`** (or
-`--site`), the CLI shows the projects available for your API key and lets you
-pick one — or create a new one. After picking a project you can pick an existing
-site/URL inside it, or add a new URL:
+When you run `push` / `scan-code` in a terminal and **omit `--project`**, the CLI
+shows the projects available for your API key and lets you pick one — or create a
+new one:
 
 ```
 $ liveapisec push --endpoint "GET /users"
 No --project given. Pick a project (or create a new one):
-  1) svc      (3 site(s))
-  2) mobile   (1 site(s))
-  3) create new project
-Enter number or project name: 1
-Now pick a site/URL in 'svc' (or add a new one):
   1) api-a  https://a.example.com
   2) api-b  https://b.example.com
-  3) add new URL/site
+  3) create new project
 Enter number: 2
-→ updating existing site api-b
-✓ site 65f...: api-b — 2 endpoints, auth=none
-  export SITE_ID=65f...
+→ updating existing project api-b
+✓ project 65f...: api-b — 2 endpoints, auth=none
+  export PROJECT_ID=65f...
 ```
 
 In CI (no TTY) the flags are required as before — nothing changes in pipelines.
@@ -169,7 +164,7 @@ liveapisec push \
   --endpoint "POST /payments"
 ```
 
-- The same `name` + `base_url` = **the same site** (update, not a duplicate) —
+- The same `name` + `base_url` = **the same project** (update, not a duplicate) —
   you can call push in every build.
 - Instead of a list of endpoints you can provide an OpenAPI spec: `--openapi-url https://api.example.com/openapi.json`.
 - Local spec file (no server-side fetch, works with localhost/private URLs that `--openapi-url` blocks): `--spec-file ./openapi.json` (JSON/YAML, parsed locally). The **full** spec is uploaded — parameters, request bodies, schemas and `security` are preserved (so the scanner tests them), not just method+path.
@@ -231,7 +226,7 @@ liveapisec push --name my-api --base-url https://api.example.com \
 For **cross-tenant / IDOR** testing add a second test user (another org):
 
 ```bash
-liveapisec hacker --site SITE_ID --env dev --thorough \
+liveapisec hacker --project PROJECT_ID --env dev --thorough \
   --auth-type-b clerk --auth-clerk-secret "$CLERK_TEST_SECRET" \
   --auth-clerk-user user_BBBB --auth-clerk-org org_BBBB
 ```
@@ -258,14 +253,14 @@ liveapisec push --name my-api --base-url https://api.example.com \
 Output:
 
 ```
-site 65f...abc: my-api — 2 endpoints, auth=none
-export SITE_ID=65f...abc
+project 65f...abc: my-api — 2 endpoints, auth=none
+export PROJECT_ID=65f...abc
 ```
 
 ### 2. `scan-code` — scan your source code and push the endpoints
 
 Point the CLI at a repo/folder and it detects the framework, extracts the API
-endpoints from the code and pushes them — no running site or OpenAPI spec needed.
+endpoints from the code and pushes them — no running project or OpenAPI spec needed.
 **The scan runs 100% locally: your code never leaves the machine.** Only the
 extracted endpoint list (`METHOD + path`) is sent to the API. (The old name
 `push-code` still works as an alias.)
@@ -304,8 +299,8 @@ framework: fastapi (42 files scanned)
 found 58 endpoints:
   GET     /users
   POST    /payments
-site 65f...abc: my-api — 58 endpoints, auth=none
-export SITE_ID=65f...abc
+project 65f...abc: my-api — 58 endpoints, auth=none
+export PROJECT_ID=65f...abc
 ```
 
 > **Note on methods**: FastAPI/Flask/Express/NestJS/Spring/Laravel/Go/Rust carry
@@ -316,10 +311,10 @@ export SITE_ID=65f...abc
 
 ```bash
 # fire and forget (202, does not wait)
-liveapisec scan --site SITE_ID --branch main --commit "$GITHUB_SHA"
+liveapisec scan --project PROJECT_ID --branch main --commit "$GITHUB_SHA"
 
 # wait for the result and fail the build on high (CI gate)
-liveapisec scan --site SITE_ID --branch main --commit "$SHA" \
+liveapisec scan --project PROJECT_ID --branch main --commit "$SHA" \
   --wait --fail-on high
 ```
 
@@ -328,11 +323,11 @@ liveapisec scan --site SITE_ID --branch main --commit "$SHA" \
 the CLI prints a short **summary** — risk level, coverage (`tested` / `not
 deployed`) and **points to improve** (each finding with a one-line fix). Full
 descriptive report: `liveapisec report --format md`.
-- `--url <name>` — test the site's endpoints against a specific URL (a site can
+- `--url <name>` — test the project's endpoints against a specific URL (a project can
   have several URLs — dev/staging/prod — all sharing the same endpoints; see
-  `liveapisec sites --site SITE_ID` or `liveapisec urls --site SITE_ID`). Each
+  `liveapisec project --project PROJECT_ID` or `liveapisec urls --project PROJECT_ID`). Each
   URL can pin a spec **version** (`liveapisec urls set --name prod --version X`).
-  Without `--url`, the site's default `base_url` is used.
+  Without `--url`, the project's default `base_url` is used.
 - `--fail-on high` — **exit code 1** when a finding of severity `high`/`critical`
   is found; `--fail-on critical` only for criticals; omit it → always exit 0
   (except errors).
@@ -347,26 +342,26 @@ the agent think live in the dashboard.
 
 ```bash
 # dev/staging only — NEVER production (it can break/destroy a system)
-liveapisec hacker --site SITE_ID --env development
-liveapisec hacker --site SITE_ID --env staging --wait
+liveapisec hacker --project PROJECT_ID --env development
+liveapisec hacker --project PROJECT_ID --env staging --wait
 
 # guided mode — give the agent a specific objective (TODO 3.6.2)
-liveapisec hacker --site SITE_ID --env development \
+liveapisec hacker --project PROJECT_ID --env development \
   --goal "check /users for IDOR — your record vs another user's"
 
 # two identities — differential IDOR/RBAC (A vs B): the agent can send as a/b/anon
-liveapisec hacker --site SITE_ID --env development --wait \
+liveapisec hacker --project PROJECT_ID --env development --wait \
   --goal "find IDOR" --auth-type-b bearer --auth-token-b "$USER_B_JWT"
 
 # destructive mode (default is READ-ONLY) — allows POST/PUT/PATCH/DELETE
-liveapisec hacker --site SITE_ID --env development --wait --destructive
+liveapisec hacker --project PROJECT_ID --env development --wait --destructive
 
 # localhost / internal target — through a connected CLI tunnel (terminal 1:
-# `liveapisec connect --site SITE_ID`, keep running)
-liveapisec hacker --site SITE_ID --env development --wait --tunnel
+# `liveapisec connect --project PROJECT_ID`, keep running)
+liveapisec hacker --project PROJECT_ID --env development --wait --tunnel
 ```
 
-- `--env` — environment name defined on the site (e.g. `development`, `staging`).
+- `--env` — environment name defined on the project (e.g. `development`, `staging`).
   **Production environments are rejected (403).**
 - `--goal` — optional guided attack objective (e.g. "check /users for IDOR",
   "try to escalate to admin", "enumerate secrets"). Without it the agent explores
@@ -381,7 +376,7 @@ liveapisec hacker --site SITE_ID --env development --wait --tunnel
   401/403/404). Use with `--auth-token-b` for cross-identity tests.
 - `--auth-token-b` / `--auth-type-b` — a **second identity**; the agent can send
   the same request as `a`, `b` and `anon` and compare — a confirmed IDOR is when
-  `b`/`anon` receives `a`'s data. Needs the site's main credential (slot A) too.
+  `b`/`anon` receives `a`'s data. Needs the project's main credential (slot A) too.
 - `--wait` — polls until the AI agent finishes. When it finishes, the CLI
   prints a short **summary**: risk level, requests/steps, the attack plan
   (with revisions), the agent's **recommendations**, and the request/step budget.
@@ -389,21 +384,21 @@ liveapisec hacker --site SITE_ID --env development --wait --tunnel
   Domains flow). **Localhost / private IPs (e.g. `http://localhost:8000`, `10.x`)
   are exempt** — no domain verification needed for your own local server.
 - Your API URL and credentials are **never** sent to the AI — only relative paths
-  reach the model; requests are executed server-side in a sandbox. If the site has
+  reach the model; requests are executed server-side in a sandbox. If the project has
   credentials, the agent runs **authenticated** (it only learns a flag, not the
   token) and can test IDOR/BOLA and privilege escalation as a real user.
 
-### 5. `status` — site status + recent scans
+### 5. `status` — project status + recent scans
 
 ```bash
-liveapisec status --site SITE_ID
+liveapisec status --project PROJECT_ID
 ```
 
 ### 6. `findings` — scan results
 
 ```bash
-liveapisec findings --site SITE_ID --scan SCAN_ID
-liveapisec findings --site SITE_ID --scan SCAN_ID --json   # raw data (for agents/AI)
+liveapisec findings --project PROJECT_ID --scan SCAN_ID
+liveapisec findings --project PROJECT_ID --scan SCAN_ID --json   # raw data (for agents/AI)
 ```
 
 ### 7. `verdict` — CI regression gate (new/fixed vs baseline)
@@ -413,24 +408,24 @@ are regressions, `fixed` disappeared, `persisting` were already known. Exits 1
 when NEW findings reach `--fail-on` (default: high) — the real fix-and-rescan gate:
 
 ```bash
-liveapisec verdict --site SITE_ID --scan NEW_SCAN --baseline BASE_SCAN --fail-on high
+liveapisec verdict --project PROJECT_ID --scan NEW_SCAN --baseline BASE_SCAN --fail-on high
 ```
 
-### 8. `compliance` — PCI DSS / SOC 2 / ISO 27001 / GDPR / NIS2 (Pro+)
+### 8. `compliance` — PCI DSS / SOC 2 / ISO 27001 / GDPR / NIS2 (SaaS+)
 
 Illustrative mapping of open findings onto framework requirements (with
 disclaimer — not a certification):
 
 ```bash
-liveapisec compliance --site SITE_ID --scan SCAN_ID
+liveapisec compliance --project PROJECT_ID --scan SCAN_ID
 ```
 
 ### 9. `report` — full saved scan report (summary + points to improve)
 
 ```bash
-liveapisec report --site SITE_ID --scan SCAN_ID -o report.json   # save to file
-liveapisec report --site SITE_ID --scan SCAN_ID --json           # print to stdout
-liveapisec report --site SITE_ID --scan SCAN_ID --format md -o report.md
+liveapisec report --project PROJECT_ID --scan SCAN_ID -o report.json   # save to file
+liveapisec report --project PROJECT_ID --scan SCAN_ID --json           # print to stdout
+liveapisec report --project PROJECT_ID --scan SCAN_ID --format md -o report.md
 ```
 
 The **Markdown** report (`--format md` / `-o *.md`) is the descriptive post-test
@@ -443,7 +438,7 @@ summary:
   their fix,
 - findings table + compliance mapping + `ask` section.
 
-### 10. `ask` — answer what the scanner cannot see (SEC-ASK-N)
+### 10. `ask` — answer what the scanner cannot see (SEC-ASK-N, SaaS+)
 
 Black-box tests stop at the HTTP boundary. `ask` opens a question session:
 270 checkable questions (SEC-ASK-1 … SEC-ASK-270: auth, RBAC, tenant
@@ -455,8 +450,8 @@ your system — role names, tenant model, internal endpoints; answer them, then 
 an evidence note. Every question carries a **priority** (critical/high/medium/low) — from the bank's category+pattern rules and, for AI questions, judged by the model; failures are sorted critical-first in the CLI, the panel and the Markdown report. Failures land in the Markdown report next to the findings:
 
 ```bash
-liveapisec ask new --site SITE_ID                 # fresh session (270 + AI)
-liveapisec ask sessions --site SITE_ID            # pass/fail counts per session
+liveapisec ask new --project PROJECT_ID                 # fresh session (270 + AI)
+liveapisec ask sessions --project PROJECT_ID            # pass/fail counts per session
 liveapisec ask answer --session SES --question SEC-ASK-5 --verdict fail --note "no MFA in auth.py"
 liveapisec ask run --session SES                  # interactive walkthrough
 liveapisec ask answer --session SES --question SEC-ASK-CL-1 --verdict info --note "roles: owner/admin/developer/viewer"   # answer a clarification
@@ -469,8 +464,8 @@ liveapisec ask show --session SES --only failed   # review failures
 ### 10. `certificate --pdf` — download the certificate (passed scans only)
 
 ```bash
-liveapisec certificate --site SITE_ID --scan SCAN_ID --pdf --variant full -o cert.pdf
-liveapisec certificate --site SITE_ID --scan SCAN_ID --pdf --variant client -o cert-client.pdf
+liveapisec certificate --project PROJECT_ID --scan SCAN_ID --pdf --variant full -o cert.pdf
+liveapisec certificate --project PROJECT_ID --scan SCAN_ID --pdf --variant client -o cert-client.pdf
 ```
 
 ### 0. `all` — full pipeline in one command (scan → verdict → compliance → report → PDF)
@@ -482,9 +477,9 @@ regressions. Compliance below plan and a missing certificate (scan didn't pass)
 are notes, not errors:
 
 ```bash
-liveapisec all --site SITE_ID
-liveapisec all --site SITE_ID --baseline BASE_SCAN --fail-on high --variant client
-liveapisec all --site SITE_ID --hacker --env development   # hacker-mode instead (destructive — dev/staging only)
+liveapisec all --project PROJECT_ID
+liveapisec all --project PROJECT_ID --baseline BASE_SCAN --fail-on high --variant client
+liveapisec all --project PROJECT_ID --hacker --env development   # hacker-mode instead (destructive — dev/staging only)
 ```
 
 ### Auth-matrix RBAC test — two identities, no source code needed
@@ -497,9 +492,9 @@ different objects), and admin paths exposed to A:
 
 ```bash
 # CI: two tokens from secrets (e.g. a low-priv user + an admin)
-liveapisec scan --site SITE_ID --wait \
+liveapisec scan --project PROJECT_ID --wait \
   --auth-token-b "$USER_B_JWT" --auth-type-b bearer
-liveapisec all --site SITE_ID --auth-token-b "$USER_B_JWT"
+liveapisec all --project PROJECT_ID --auth-token-b "$USER_B_JWT"
 ```
 
 - Identity **A** = the scan's normal auth (saved credential in
@@ -509,16 +504,16 @@ liveapisec all --site SITE_ID --auth-token-b "$USER_B_JWT"
 - Findings land in category `rbac` (high/medium) and flow into
   verdict → report (md) → compliance → PDF like everything else.
 
-### 11. `sites` — site details
+### 11. `project` — project details
 
-Shows the site's endpoints count, default base_url, project, schedule — and the
+Shows the project's endpoints count, default base_url, schedule — and the
 list of **URLs** (all tested with the same endpoints). Each URL can test a pinned
 spec **version** (`latest` or a snapshot). Run a scan against one with
 `scan --url <name>`.
 
 ```bash
-liveapisec sites --site SITE_ID
-# site 65f...: my-api — 12 endpoints
+liveapisec project --project PROJECT_ID
+# project 65f...: my-api — 12 endpoints
 #   base_url: https://api.example.com
 #   urls (same endpoints tested against each):
 #     - development: https://api.dev.example.com  [schedule=6h]
@@ -526,7 +521,7 @@ liveapisec sites --site SITE_ID
 #     - production: https://api.example.com  [version=1.0.3]
 ```
 
-### 15. `urls` — manage URLs (environments) of a site
+### 15. `urls` — manage URLs (environments) of a project
 
 One endpoint set, many addresses (dev/staging/prod). Each URL has its own spec
 **version** (`latest` or a snapshot), **schedule** and `paused`. See
@@ -534,69 +529,69 @@ One endpoint set, many addresses (dev/staging/prod). Each URL has its own spec
 
 ```bash
 # list
-liveapisec urls --site SITE_ID
+liveapisec urls --project PROJECT_ID
 
 # add (same endpoints tested against each URL)
-liveapisec urls add --site SITE_ID --name dev  --url https://dev.example.com
-liveapisec urls add --site SITE_ID --name prod --url https://api.example.com
+liveapisec urls add --project PROJECT_ID --name dev  --url https://dev.example.com
+liveapisec urls add --project PROJECT_ID --name prod --url https://api.example.com
 
 # pin a spec version / set schedule / pause
-liveapisec urls set --site SITE_ID --name prod --version 1.0.3
-liveapisec urls set --site SITE_ID --name prod --schedule 24h
-liveapisec urls set --site SITE_ID --name prod --paused
+liveapisec urls set --project PROJECT_ID --name prod --version 1.0.3
+liveapisec urls set --project PROJECT_ID --name prod --schedule 24h
+liveapisec urls set --project PROJECT_ID --name prod --paused
 
 # remove
-liveapisec urls rm --site SITE_ID --name dev
+liveapisec urls rm --project PROJECT_ID --name dev
 ```
 
 `--version` accepts `latest` (default) or a version from
-`liveapisec sites`/the Versions tab. Adding/updating with an unknown version is
+`liveapisec project`/the Versions tab. Adding/updating with an unknown version is
 rejected (400) — no silent testing of the wrong spec.
 
-### 16. `versions` — list spec versions of a site
+### 16. `versions` — list spec versions of a project
 
 Shows every snapshot of the endpoint set (newest first): version, endpoints
 count, date, change note, which URLs pin it (`used by`) and which is `current`.
 Use a version with `urls set --version`.
 
 ```bash
-liveapisec versions --site SITE_ID
-# versions of site 65f... (newest first):
+liveapisec versions --project PROJECT_ID
+# versions of project 65f... (newest first):
 #   1.0.3 (current)  42 endpoints  2026-09-21  merge: +3 endpoints  used by: dev
 #   1.0.2            40 endpoints  2026-09-18  edited GET /users   used by: prod
 #   1.0.0            38 endpoints  2026-09-10  initial push (CI/CD)
 
-liveapisec versions --site SITE_ID --json   # raw list (for scripts / agents)
+liveapisec versions --project PROJECT_ID --json   # raw list (for scripts / agents)
 ```
 
-### 17. `delete` — delete a site or a whole project
+### 17. `delete` — delete a project
 
-Removes the site/project and **all** its data (scans, findings, URLs, versions,
+Removes the project and **all** its data (scans, findings, URLs, versions,
 credentials, certificate). Asks for confirmation unless `--yes`.
 
 ```bash
-liveapisec delete --site SITE_ID
+liveapisec delete --project PROJECT_ID
 liveapisec delete --project acme --yes
 ```
 
-### 12. `scans` — full test (scan) history for a site
+### 12. `scans` — full test (scan) history for a project
 
-See every security test ever run on a site (status, branch/commit, tests run,
+See every security test ever run on a project (status, branch/commit, tests run,
 findings by severity) — useful for an agent that wants to know what was tested,
 when, and with what result:
 
 ```bash
-liveapisec scans --site SITE_ID
+liveapisec scans --project PROJECT_ID
 # scan 65f...001  status=completed  branch=main  commit=abc  tests=42  findings=3 (high=1 medium=2)
 # scan 65f...002  status=failed     branch=main
 
-liveapisec scans --site SITE_ID --json        # raw list (for scripts / agents)
-liveapisec scans --site SITE_ID --limit 5     # only the 5 most recent
+liveapisec scans --project PROJECT_ID --json        # raw list (for scripts / agents)
+liveapisec scans --project PROJECT_ID --limit 5     # only the 5 most recent
 ```
 
 ### 13. `projects` — last test status per project (no dashboard needed)
 
-See every project, its sites and the **last security test result** straight in the
+See every project and the **last security test result** straight in the
 terminal — no need to open the dashboard:
 
 ```
@@ -622,19 +617,19 @@ organisation (default), one project, or a single URL.
 ```bash
 liveapisec certificate                                  # whole organisation
 liveapisec certificate --scope project --project acme
-liveapisec certificate --scope site --site SITE_ID
+liveapisec certificate --scope project --project PROJECT_ID
 liveapisec certificate --type badge   # badge | banner | card | iframe
 
-# which URL the PUBLIC site certificate concerns (not shown publicly):
-liveapisec certificate --site SITE_ID --url production
-liveapisec certificate --site SITE_ID --url ""          # back to the default base_url
+# which URL the PUBLIC project certificate concerns (not shown publicly):
+liveapisec certificate --project PROJECT_ID --url production
+liveapisec certificate --project PROJECT_ID --url ""          # back to the default base_url
 ```
 
 Paste the returned snippet (an `<a href=...>` wrapping `<div data-liveapisec-widget ...>`,
-plus `widget.js`) into your site, docs or trust page. The link is static in the HTML
+plus `widget.js`) into your project, docs or trust page. The link is static in the HTML
 (crawlable) and the whole widget is clickable — it updates with every scan.
 
-The public certificate can be generated for any URL, but the **public** site
+The public certificate can be generated for any URL, but the **public** project
 certificate reflects one selected URL (its status is computed only from that
 URL's scans). The URL itself is **never shown** on the public page/widget — see
 [URLs, versions & certificate](../docs/URLS_VERSIONS_CERTIFICATES.md).
@@ -646,16 +641,16 @@ exists only on your machine. Start a tunnel — the CLI then acts as a proxy:
 
 ```bash
 # terminal 1 — keep running
-liveapisec connect --site SITE_ID
+liveapisec connect --project PROJECT_ID
 
 # terminal 2 — route the scan through the CLI
-liveapisec scan --site SITE_ID --wait --tunnel
+liveapisec scan --project PROJECT_ID --wait --tunnel
 
 # hacker-mode works through the tunnel too (dev/staging only)
-liveapisec hacker --site SITE_ID --env development --wait --tunnel
+liveapisec hacker --project PROJECT_ID --env development --wait --tunnel
 ```
 
-Only the site's `base_url` host is forwarded (not an open proxy).
+Only the project's `base_url` host is forwarded (not an open proxy).
 
 ---
 
@@ -685,7 +680,7 @@ jobs:
         run: |
           liveapisec push --name my-api --base-url "$BASE_URL" \
             --endpoint "GET /users" --endpoint "POST /payments"
-          liveapisec all --site "$SITE_ID" --fail-on high \
+          liveapisec all --project "$PROJECT_ID" --fail-on high \
             --format md --report-out security-report.md
       - name: Upload security report + certificate
         if: always()
@@ -706,7 +701,7 @@ open the run → *Artifacts* → `liveapisec-report`. The same exit-code contrac
 works in GitLab CI, Jenkins or plain bash (`set -e` stops the pipeline on
 regressions). For agents/AI parsing, use `--json` on `verdict`/`scan` instead.
 
-> **Why is push safe?** Push is idempotent (name+base_url → the same site), so
+> **Why is push safe?** Push is idempotent (name+base_url → the same project), so
 > the next build does not create junk — it updates endpoints and the token, and
 > the next `scan` tests the latest state.
 
@@ -739,10 +734,10 @@ Besides the CLI, the package also exports a client for scripts:
 from liveapisec import LiveAPISec
 
 api = LiveAPISec()  # LIVEAPISEC_API_KEY from env
-site = api.create_site("my-api", "https://api.example.com",
+project = api.create_project("my-api", "https://api.example.com",
                        endpoints=[{"method": "GET", "path": "/users"}])
-scan = api.trigger_scan(site["site_id"], branch="main", commit="abc")
-done = api.wait_for_scan(site["site_id"], scan["scan_id"])
+scan = api.trigger_scan(project["project_id"], branch="main", commit="abc")
+done = api.wait_for_scan(project["project_id"], scan["scan_id"])
 blocked = LiveAPISec.findings_above(done["findings"], "high")
 ```
 
@@ -754,15 +749,15 @@ the same result as the CLI (endpoints pushed, scans run, findings readable by
 your agent or CI):
 
 ```bash
-# push a site + endpoints from any language
-curl -X POST $LIVEAPISEC_API_URL/developers/sites \
+# push a project + endpoints from any language
+curl -X POST $LIVEAPISEC_API_URL/developers/projects \
   -H "Authorization: Bearer $LIVEAPISEC_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"name":"my-api","base_url":"https://api.example.com",
        "endpoints":[{"method":"GET","path":"/users"}]}'
 
 # trigger a scan
-curl -X POST $LIVEAPISEC_API_URL/developers/sites/$SITE_ID/scans \
+curl -X POST $LIVEAPISEC_API_URL/developers/projects/$PROJECT_ID/scans \
   -H "Authorization: Bearer $LIVEAPISEC_API_KEY" \
   -d '{"branch":"main","commit":"abc123"}'
 ```
@@ -784,14 +779,14 @@ Python) — use `scan-code` to extract endpoints from source, or
 Environment:
 - `LIVEAPISEC_API_KEY` — dev API key (las_dev_...), usually already set.
 - `LIVEAPISEC_API_URL` — API base URL (default: https://api.liveapisec.com).
-- `SITE_ID` — the site id returned by `liveapisec push` / `liveapisec sites`.
+- `PROJECT_ID` — the project id returned by `liveapisec push` / `liveapisec project`.
 
 Fetch information about the portal (to diagnose and fix issues):
 - `liveapisec projects`              — every project + last test status
-- `liveapisec scans --site <id>`    — full test history for a site (--json for raw)
-- `liveapisec status --site <id>`   — site status + recent scans
-- `liveapisec sites --site <id>`    — site details
-- `liveapisec findings --site <id> --scan <scan_id>`  — findings (--json for raw)
+- `liveapisec scans --project <id>`    — full test history for a project (--json for raw)
+- `liveapisec status --project <id>`   — project status + recent scans
+- `liveapisec project --project <id>`    — project details
+- `liveapisec findings --project <id> --scan <scan_id>`  — findings (--json for raw)
 
 Language note: the CLI is written in Python, but it tests APIs built in ANY
 language/framework — Python, Node.js, Go, Rust, Java, PHP, Ruby, .NET, etc.
@@ -803,18 +798,18 @@ Workflow:
 1. Push the API under test (idempotent — safe to repeat):
    `liveapisec push --name <name> --base-url <url> --endpoint "METHOD /path" [--endpoint ...] [--openapi-url <url>] [--auth-type jwt|bearer|cookie|api_key --auth-token <token>]`
 2. Run a security scan and wait for the result:
-   `liveapisec scan --site <site_id> --branch <branch> --commit <sha> --wait`
+   `liveapisec scan --project <project_id> --branch <branch> --commit <sha> --wait`
 3. Read findings (severity, title, target):
-   `liveapisec findings --site <site_id> --scan <scan_id>` (add `--json` for raw JSON).
+   `liveapisec findings --project <project_id> --scan <scan_id>` (add `--json` for raw JSON).
 
 Self-repair loop (fix an issue from our test, end-to-end):
 1. See what failed: `liveapisec projects`
-2. Find the failed scan: `liveapisec scans --site <site_id>`
-3. Read the findings: `liveapisec findings --site <site_id> --scan <scan_id> --json`
+2. Find the failed scan: `liveapisec scans --project <project_id>`
+3. Read the findings: `liveapisec findings --project <project_id> --scan <scan_id> --json`
 4. Fix the code (e.g. add a security-header middleware), commit.
 5. Re-push (idempotent) and re-run the gate:
    `liveapisec push --name <name> --base-url <url> --endpoint "GET /x"`
-   `liveapisec scan --site <site_id> --branch <branch> --commit <sha> --wait --fail-on high`
+   `liveapisec scan --project <project_id> --branch <branch> --commit <sha> --wait --fail-on high`
 6. Confirm the gate is green: `liveapisec projects`
 
 Rules:
@@ -830,7 +825,7 @@ Rules:
 After every scan the CLI/API **detect and store** which endpoint groups require
 authentication (universal: from observed `401/403` on GET/HEAD probes **and** the
 OpenAPI per-operation `security` — works even if the spec is incomplete). See it
-with `liveapisec sites --site SITE_ID`:
+with `liveapisec project --project PROJECT_ID`:
 
 ```
   auth schemes (from spec): HTTPBearer(http), DevApiKey(http)
@@ -854,15 +849,15 @@ single credential can't authenticate both. Bind a credential to a **path prefix*
 and the scanner picks the right one **per request** (longest prefix wins):
 
 ```bash
-liveapisec credentials set --site SITE_ID --slot a \
+liveapisec credentials set --project PROJECT_ID --slot a \
   --auth-type bearer --auth-token "$CLERK_JWT"          # default (all routes)
-liveapisec credentials set --site SITE_ID --slot devkey --path /developers \
+liveapisec credentials set --project PROJECT_ID --slot devkey --path /developers \
   --auth-type api_key --auth-token "$DEV_KEY" --auth-header X-API-Key
 
-liveapisec credentials --site SITE_ID
+liveapisec credentials --project PROJECT_ID
 #   - slot=a       bearer   prefix=(default)
 #   - slot=devkey  api_key  prefix=/developers
-liveapisec credentials rm --site SITE_ID --slot devkey
+liveapisec credentials rm --project PROJECT_ID --slot devkey
 ```
 
 One `scan` now authenticates **both** groups; the auto **auth profile** confirms

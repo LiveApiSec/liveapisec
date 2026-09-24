@@ -110,7 +110,7 @@ def test_main_uses_saved_config(monkeypatch, tmp_path, capsys) -> None:
 
     def handler(request: httpx.Request) -> httpx.Response:
         captured["auth"] = request.headers.get("Authorization")
-        return httpx.Response(200, json={"site_id": "65f1", "name": "x", "endpoints_count": 0})
+        return httpx.Response(200, json={"project_id": "65f1", "name": "x", "endpoints_count": 0})
 
     # patch the client constructor to inject the mock transport
     original = LiveAPISec.__init__
@@ -125,7 +125,7 @@ def test_main_uses_saved_config(monkeypatch, tmp_path, capsys) -> None:
         )
 
     monkeypatch.setattr(LiveAPISec, "__init__", patched_init)
-    code = main(["sites", "--site", "65f1"])
+    code = main(["project", "--project", "65f1"])
     assert code == 0
     assert captured["auth"] == "Bearer las_dev_saved"
 
@@ -137,3 +137,44 @@ def test_main_noninteractive_missing_key(monkeypatch, capsys) -> None:
     err = capsys.readouterr().err
     assert code == 2
     assert "Missing API key" in err
+
+
+@pytest.mark.parametrize(
+    "status,title,detail,expected",
+    [
+        (
+            402,
+            "Hacker mode is a paid feature",
+            "Hacker mode (AI) is available from the SaaS plan and up. Upgrade to unlock it.",
+            "/pricing",
+        ),
+        (401, "Unauthorized", "API key expired", "create a new key"),
+        (403, "Insufficient scope", "API key needs one of: projects:write", "missing the required scope"),
+    ],
+)
+def test_main_prints_actionable_hint(monkeypatch, tmp_path, capsys, status, title, detail, expected) -> None:
+    """401 (klucz), 402 (plan) i 403 (scope) dostają czytelną podpowiedź w CLI."""
+    monkeypatch.setenv("LIVEAPISEC_CONFIG_DIR", str(tmp_path))
+    monkeypatch.setenv("LIVEAPISEC_API_KEY", "las_dev_x")
+    monkeypatch.delenv("LIVEAPISEC_API_URL", raising=False)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(status, json={"title": title, "detail": detail})
+
+    original = LiveAPISec.__init__
+
+    def patched_init(self, api_url=None, api_key=None, timeout=30.0, transport=None):
+        original(
+            self,
+            api_url="https://liveapisec.test",
+            api_key=api_key,
+            timeout=timeout,
+            transport=httpx.MockTransport(handler),
+        )
+
+    monkeypatch.setattr(LiveAPISec, "__init__", patched_init)
+    code = main(["project", "--project", "65f1"])
+    err = capsys.readouterr().err
+    assert code == 2
+    assert "error:" in err
+    assert expected in err

@@ -113,22 +113,21 @@ class LiveAPISec:
             return None
         return resp.json()
 
-    # -- keys / sites ---------------------------------------------------------
-    def create_site(
+    # -- keys / projects (TODO 2.55: projekt = ApiSpec) ----------------------
+    def create_project(
         self,
         name: str,
         base_url: str,
         endpoints: list[dict[str, str]] | None = None,
         openapi_url: str | None = None,
         spec: dict[str, Any] | None = None,
-        project: str | None = None,
         auth: dict[str, Any] | None = None,
-        site_id: str | None = None,
+        project_id: str | None = None,
         schedule: str | None = None,
         access: str | None = None,
     ) -> dict[str, Any]:
-        """Push a site (idempotent by name+base_url). Without `site_id` → POST (create/update),
-        with `site_id` → PUT (explicit update).
+        """Push a project (idempotent by name+base_url). Without `project_id` → POST
+        (create/update), with `project_id` → PUT (explicit update).
 
         `spec` (TODO 2.50) sends the FULL OpenAPI document (parameters, requestBody,
         schemas, security) — used by `--spec-file` for localhost/private URLs.
@@ -140,66 +139,60 @@ class LiveAPISec:
             payload["endpoints"] = endpoints
         if openapi_url:
             payload["openapi_url"] = openapi_url
-        if project:
-            payload["project"] = project
         if auth:
             payload["auth"] = auth
         if schedule:
             payload["schedule"] = schedule
         if access:
             payload["access"] = access
-        if site_id:
-            return self._request("PUT", f"/developers/sites/{site_id}", json=payload)
-        return self._request("POST", "/developers/sites", json=payload)
+        if project_id:
+            return self._request("PUT", f"/developers/projects/{project_id}", json=payload)
+        return self._request("POST", "/developers/projects", json=payload)
 
-    def get_site(self, site_id: str) -> dict[str, Any]:
-        return self._request("GET", f"/developers/sites/{site_id}")
+    def get_project(self, project_id: str) -> dict[str, Any]:
+        return self._request("GET", f"/developers/projects/{project_id}")
 
-    def list_sites(self) -> list[dict[str, Any]]:
-        """All sites for the API key's org (CLI groups them by project)."""
-        return self._request("GET", "/developers/sites")
+    def list_projects(self) -> list[dict[str, Any]]:
+        """All projects for the API key's org."""
+        return self._request("GET", "/developers/projects")
 
-    def get_certificate(
-        self, scope: str = "org", project: str | None = None, site: str | None = None
-    ) -> dict[str, Any]:
-        """Certificate / Trust Page in a chosen scope (org | project | site)."""
+    def get_certificate(self, scope: str = "org", project: str | None = None) -> dict[str, Any]:
+        """Certificate / Trust Page in a chosen scope (org | project)."""
         params: dict[str, str] = {"scope": scope}
         if project:
             params["project"] = project
-        if site:
-            params["site"] = site
         return self._request("GET", "/developers/certificate", params=params)
 
-    def set_site_certificate_url(
-        self, site_id: str, environment: str | None
+    def set_project_certificate_url(
+        self, project_id: str, environment: str | None
     ) -> dict[str, Any]:
-        """TODO 2.50: choose which URL the PUBLIC site certificate concerns.
+        """TODO 2.50: choose which URL the PUBLIC project certificate concerns.
 
-        `environment=None` = the site's default base_url. The selected URL is not
+        `environment=None` = the project's default base_url. The selected URL is not
         shown on the public certificate/trust page.
         """
         return self._request(
-            "PATCH", f"/developers/sites/{site_id}/certificate", json={"environment": environment}
+            "PATCH", f"/developers/projects/{project_id}/certificate", json={"environment": environment}
         )
 
     # -- URLs / environments (TODO 2.50) -------------------------------------
-    def list_environments(self, site_id: str) -> list[dict[str, Any]]:
-        """All URLs of a site — the same endpoint set is tested against each."""
-        return self._request("GET", f"/developers/sites/{site_id}/environments")
+    def list_environments(self, project_id: str) -> list[dict[str, Any]]:
+        """All URLs of a project — the same endpoint set is tested against each."""
+        return self._request("GET", f"/developers/projects/{project_id}/environments")
 
-    def list_versions(self, site_id: str) -> list[dict[str, Any]]:
-        """All spec versions of a site — to pin on a URL (`urls set --version`)."""
-        return self._request("GET", f"/developers/sites/{site_id}/versions")
+    def list_versions(self, project_id: str) -> list[dict[str, Any]]:
+        """All spec versions of a project — to pin on a URL (`urls set --version`)."""
+        return self._request("GET", f"/developers/projects/{project_id}/versions")
 
     def add_environment(
         self,
-        site_id: str,
+        project_id: str,
         name: str,
         base_url: str,
         version: str = "latest",
         schedule: str | None = None,
     ) -> dict[str, Any]:
-        """Add a URL (environment) to a site."""
+        """Add a URL (environment) to a project."""
         payload: dict[str, Any] = {
             "name": name,
             "base_url": base_url,
@@ -207,35 +200,31 @@ class LiveAPISec:
         }
         if schedule:
             payload["schedule"] = schedule
-        return self._request("POST", f"/developers/sites/{site_id}/environments", json=payload)
+        return self._request("POST", f"/developers/projects/{project_id}/environments", json=payload)
 
-    def update_environment(self, site_id: str, name: str, **fields: Any) -> dict[str, Any]:
+    def update_environment(self, project_id: str, name: str, **fields: Any) -> dict[str, Any]:
         """Update a URL (base_url / version / schedule / paused)."""
         payload = {k: v for k, v in fields.items() if v is not None}
         return self._request(
-            "PATCH", f"/developers/sites/{site_id}/environments/{name}", json=payload
+            "PATCH", f"/developers/projects/{project_id}/environments/{name}", json=payload
         )
 
-    def remove_environment(self, site_id: str, name: str) -> None:
-        """Remove a URL from a site."""
-        self._request("DELETE", f"/developers/sites/{site_id}/environments/{name}")
+    def remove_environment(self, project_id: str, name: str) -> None:
+        """Remove a URL from a project."""
+        self._request("DELETE", f"/developers/projects/{project_id}/environments/{name}")
 
-    # -- delete site / project (TODO 2.50) ------------------------------------
-    def delete_site(self, site_id: str) -> None:
-        """Delete a site and all its data (scans, findings, URLs, versions, cert)."""
-        self._request("DELETE", f"/developers/sites/{site_id}")
-
-    def delete_project(self, project: str) -> None:
-        """Delete a whole project (all its sites and their data)."""
-        self._request("DELETE", f"/developers/projects/{project}")
+    # -- delete project (TODO 2.50/2.55) -------------------------------------
+    def delete_project(self, project_id: str) -> None:
+        """Delete a project and all its data (scans, findings, URLs, versions, cert)."""
+        self._request("DELETE", f"/developers/projects/{project_id}")
 
     # -- credentials per-prefix (TODO 2.50) ----------------------------------
-    def list_credentials(self, site_id: str) -> list[dict[str, Any]]:
-        """Masked credentials of a site (slot, path_prefix, auth_method)."""
-        return self._request("GET", f"/developers/sites/{site_id}/credentials")
+    def list_credentials(self, project_id: str) -> list[dict[str, Any]]:
+        """Masked credentials of a project (slot, path_prefix, auth_method)."""
+        return self._request("GET", f"/developers/projects/{project_id}/credentials")
 
     def set_credential(
-        self, site_id: str, slot: str, auth: dict[str, Any], path_prefix: str | None = None
+        self, project_id: str, slot: str, auth: dict[str, Any], path_prefix: str | None = None
     ) -> dict[str, Any]:
         """Create/update a credential (optionally bound to a path prefix).
 
@@ -245,21 +234,21 @@ class LiveAPISec:
         if path_prefix is not None:
             payload["path_prefix"] = path_prefix
         return self._request(
-            "POST", f"/developers/sites/{site_id}/credentials", json=payload
+            "POST", f"/developers/projects/{project_id}/credentials", json=payload
         )
 
-    def remove_credential(self, site_id: str, slot: str) -> dict[str, Any]:
+    def remove_credential(self, project_id: str, slot: str) -> dict[str, Any]:
         """Remove a credential by slot (auth.type=none)."""
         return self._request(
             "POST",
-            f"/developers/sites/{site_id}/credentials",
+            f"/developers/projects/{project_id}/credentials",
             json={"slot": slot, "auth": {"type": "none"}},
         )
 
     # -- scans ----------------------------------------------------------------
     def trigger_scan(
         self,
-        site_id: str,
+        project_id: str,
         branch: str | None = None,
         commit: str | None = None,
         tunnel: bool = False,
@@ -273,8 +262,8 @@ class LiveAPISec:
         `auth_b` is a second identity for the auth-matrix RBAC test, e.g.
         `{"auth_method": "bearer", "fields": {"token": "..."}}` — it is
         encrypted server-side and lives only on this scan's document.
-        `environment` (TODO 2.50) is a URL name — the site's endpoint set is
-        tested against that URL's base_url (see `environments` on the site).
+        `environment` (TODO 2.50) is a URL name — the project's endpoint set is
+        tested against that URL's base_url (see `environments` on the project).
         """
         payload: dict[str, Any] = {}
         if branch:
@@ -287,12 +276,12 @@ class LiveAPISec:
             payload["auth_b"] = auth_b
         if environment:
             payload["environment"] = environment
-        return self._request("POST", f"/developers/sites/{site_id}/scans", json=payload)
+        return self._request("POST", f"/developers/projects/{project_id}/scans", json=payload)
 
     # -- reverse tunnel (A): CLI as a proxy for internal/localhost tests ------
-    def open_tunnel(self, site_id: str) -> dict[str, Any]:
-        """Register a tunnel for a site (CLI then long-polls for requests)."""
-        return self._request("POST", "/developers/tunnels", json={"site_id": site_id})
+    def open_tunnel(self, project_id: str) -> dict[str, Any]:
+        """Register a tunnel for a project (CLI then long-polls for requests)."""
+        return self._request("POST", "/developers/tunnels", json={"project_id": project_id})
 
     def tunnel_next(self, tunnel_id: str, timeout: int = 25) -> dict[str, Any] | None:
         """Long-poll for the next request to execute locally (None = timeout)."""
@@ -312,7 +301,7 @@ class LiveAPISec:
 
     # -- hacker mode (TODO 3.6 / 3.6.1) --------------------------------------
     def trigger_hacker_scan(
-        self, site_id: str, environment: str, goal: str | None = None,
+        self, project_id: str, environment: str, goal: str | None = None,
         tunnel: bool = False, destructive: bool = False,
         auth_b: dict[str, Any] | None = None, thorough: bool = False,
     ) -> dict[str, Any]:
@@ -338,53 +327,53 @@ class LiveAPISec:
             payload["thorough"] = True
         return self._request(
             "POST",
-            f"/developers/sites/{site_id}/hacker-scans",
+            f"/developers/projects/{project_id}/hacker-scans",
             json=payload,
         )
 
-    def list_scans(self, site_id: str) -> list[dict[str, Any]]:
-        return self._request("GET", f"/developers/sites/{site_id}/scans")
+    def list_scans(self, project_id: str) -> list[dict[str, Any]]:
+        return self._request("GET", f"/developers/projects/{project_id}/scans")
 
-    def get_scan(self, site_id: str, scan_id: str) -> dict[str, Any] | None:
+    def get_scan(self, project_id: str, scan_id: str) -> dict[str, Any] | None:
         """A single scan (via the list — no dedicated GET scan endpoint)."""
-        for s in self.list_scans(site_id):
+        for s in self.list_scans(project_id):
             if s.get("scan_id") == scan_id:
                 return s
         return None
 
-    def get_findings(self, site_id: str, scan_id: str) -> list[dict[str, Any]]:
-        return self._request("GET", f"/developers/sites/{site_id}/scans/{scan_id}/findings")
+    def get_findings(self, project_id: str, scan_id: str) -> list[dict[str, Any]]:
+        return self._request("GET", f"/developers/projects/{project_id}/scans/{scan_id}/findings")
 
     def get_verdict(
-        self, site_id: str, scan_id: str, baseline_scan_id: str, fail_on: str = "high"
+        self, project_id: str, scan_id: str, baseline_scan_id: str, fail_on: str = "high"
     ) -> dict[str, Any]:
         """CI verdict: new/fixed/persisting findings vs baseline + pass/fail."""
         return self._request(
             "GET",
-            f"/developers/sites/{site_id}/scans/{scan_id}/verdict",
+            f"/developers/projects/{project_id}/scans/{scan_id}/verdict",
             params={"baseline_scan_id": baseline_scan_id, "fail_on": fail_on},
         )
 
-    def get_compliance(self, site_id: str, scan_id: str) -> dict[str, Any]:
-        """Compliance mapping (PCI DSS / SOC 2 / ISO 27001 / GDPR / NIS2, Pro+)."""
+    def get_compliance(self, project_id: str, scan_id: str) -> dict[str, Any]:
+        """Compliance mapping (PCI DSS / SOC 2 / ISO 27001 / GDPR / NIS2, SaaS+)."""
         return self._request(
-            "GET", f"/developers/sites/{site_id}/scans/{scan_id}/compliance"
+            "GET", f"/developers/projects/{project_id}/scans/{scan_id}/compliance"
         )
 
-    def get_report(self, site_id: str, scan_id: str) -> dict[str, Any]:
+    def get_report(self, project_id: str, scan_id: str) -> dict[str, Any]:
         """Full saved scan report (raw results + summary)."""
         return self._request(
-            "GET", f"/developers/sites/{site_id}/scans/{scan_id}/report"
+            "GET", f"/developers/projects/{project_id}/scans/{scan_id}/report"
         )
 
     def download_certificate_pdf(
-        self, site_id: str, scan_id: str, variant: str = "full"
+        self, project_id: str, scan_id: str, variant: str = "full"
     ) -> tuple[bytes, str]:
         """Certificate PDF (only when the scan passed). Returns (bytes, filename)."""
         import httpx
 
         url = (
-            f"{self.api_url}/developers/sites/{site_id}/scans/{scan_id}/"
+            f"{self.api_url}/developers/projects/{project_id}/scans/{scan_id}/"
             f"certificate.pdf?variant={variant}"
         )
         try:
@@ -407,7 +396,7 @@ class LiveAPISec:
         return resp.content, filename
 
     # -- ask-mode (SEC-ASK-N): code-review questionnaire -----------------------
-    def create_ask_session(self, site_id: str, include_ai: bool = True) -> dict[str, Any]:
+    def create_ask_session(self, project_id: str, include_ai: bool = True) -> dict[str, Any]:
         """New ask session: bank + AI questions tailored to the API.
 
         The server calls the LLM inline, so allow a long timeout (default 30s
@@ -415,14 +404,14 @@ class LiveAPISec:
         """
         return self._request(
             "POST",
-            f"/developers/sites/{site_id}/ask-sessions",
+            f"/developers/projects/{project_id}/ask-sessions",
             json={"include_ai": include_ai},
             timeout=240.0,
         )
 
-    def list_ask_sessions(self, site_id: str) -> list[dict[str, Any]]:
-        """Ask sessions of a site with answer aggregates."""
-        return self._request("GET", f"/developers/sites/{site_id}/ask-sessions")
+    def list_ask_sessions(self, project_id: str) -> list[dict[str, Any]]:
+        """Ask sessions of a project with answer aggregates."""
+        return self._request("GET", f"/developers/projects/{project_id}/ask-sessions")
 
     def get_ask_session(self, session_id: str) -> dict[str, Any]:
         """Full session: questions with answers."""
@@ -456,7 +445,7 @@ class LiveAPISec:
     # -- CI helpers ------------------------------------------------------------
     def wait_for_scan(
         self,
-        site_id: str,
+        project_id: str,
         scan_id: str,
         poll_interval: float = 3.0,
         timeout: float = 600.0,
@@ -464,12 +453,12 @@ class LiveAPISec:
         """Poll until the scan finishes (completed/failed). Returns scan + findings."""
         deadline = time.monotonic() + timeout
         while True:
-            scan = self.get_scan(site_id, scan_id)
+            scan = self.get_scan(project_id, scan_id)
             if scan is None:
-                raise LiveAPISecError(None, "Scan not found", f"scan {scan_id} on site {site_id}")
+                raise LiveAPISecError(None, "Scan not found", f"scan {scan_id} on project {project_id}")
             status = scan.get("status")
             if status in (ScanStatus.COMPLETED, ScanStatus.FAILED):
-                scan["findings"] = self.get_findings(site_id, scan_id)
+                scan["findings"] = self.get_findings(project_id, scan_id)
                 return scan
             if time.monotonic() > deadline:
                 raise LiveAPISecError(
