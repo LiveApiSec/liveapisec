@@ -3,7 +3,7 @@
 Supports FastAPI, Flask, Django, Next.js, NestJS, Express, Laravel, generic PHP
 routers and Spring (Java). Used by the `liveapisec scan-code` command so a
 developer can point at a repo/folder and get a list of endpoints pushed to
-LiveAPISec without a running site or OpenAPI spec.
+LiveAPISec without a running server or OpenAPI spec.
 
 Endpoints are returned as ``{"method": "GET", "path": "/users", "source": "..."}``.
 """
