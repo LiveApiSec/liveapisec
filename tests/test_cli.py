@@ -241,7 +241,6 @@ def test_cli_push_builds_payload(capsys) -> None:
         project = None
         endpoint: list = [{"method": "GET", "path": "/users"}]  # noqa: RUF012 (test stub)
         openapi_url = None
-        project = None
         auth_type = "none"
         auth_token = None
         auth_cookie = None
@@ -310,7 +309,6 @@ def test_cli_push_requires_endpoint(capsys) -> None:
         project = None
         endpoint: list = []  # noqa: RUF012 (test stub)
         openapi_url = None
-        project = None
         verify = False
         json = False
 
@@ -341,7 +339,6 @@ def test_cli_push_many_endpoints_sent_and_summarized(capsys) -> None:
             {"method": "GET", "path": f"/users/{i}"} for i in range(1500)
         ]
         openapi_url = None
-        project = None
         auth_type = "none"
         auth_token = None
         auth_cookie = None
@@ -510,7 +507,6 @@ def test_push_interactive_picks_existing_site(monkeypatch, capsys) -> None:
         project = None
         endpoint: list = [{"method": "GET", "path": "/users"}]  # noqa: RUF012
         openapi_url = None
-        project = None
         auth_type = "none"
         auth_token = None
         auth_cookie = None
@@ -802,7 +798,6 @@ def test_cli_certificate_prints_snippet(capsys) -> None:
         json = False
         type = "badge"
         scope = "org"
-        project = None
         project = None
 
     assert _cmd_certificate(Client(), Args()) == 0
@@ -1430,7 +1425,6 @@ def test_cli_certificate_url_flag(capsys) -> None:
         json = False
         type = "badge"
         scope = "project"
-        project = None
         project = "s1"
         url = "staging"
         pdf = False
@@ -1585,7 +1579,6 @@ def test_push_spec_file_sends_full_spec(tmp_path) -> None:
         project = None
         endpoint: list = []  # noqa: RUF012
         openapi_url = None
-        project = None
         auth_type = "none"
         auth_token = None
         auth_cookie = None
