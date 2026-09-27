@@ -185,6 +185,12 @@ liveapisec config --clear  # remove the saved config file
 
 ## Commands
 
+> **Project reference:** everywhere a command takes `--project`, you can pass
+either the project **ObjectId** or its **slug** (e.g. `payments-api`). The slug is
+shown by `liveapisec projects` / `liveapisec project`, and is the same identifier
+used on the public page `liveapisec.com/trust/<slug>`. Resolution happens in the
+API, always scoped to your organisation.
+
 ### Interactive mode (project picker)
 
 When you run `push` / `scan-code` in a terminal and **omit `--project`**, the CLI
@@ -194,8 +200,8 @@ new one:
 ```
 $ liveapisec push --endpoint "GET /users"
 No --project given. Pick a project (or create a new one):
-  1) api-a  https://a.example.com
-  2) api-b  https://b.example.com
+  1) api-a (api-a)  https://a.example.com
+  2) api-b (api-b)  https://b.example.com
   3) create new project
 Enter number: 2
 → updating existing project api-b

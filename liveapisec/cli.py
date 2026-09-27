@@ -164,7 +164,10 @@ def _pick_project(projects: list[dict[str, Any]]) -> dict[str, Any] | None:
     """
     print(_cyan("No --project given. Pick a project (or create a new one):"))
     for i, p in enumerate(projects, 1):
-        print(f"  {_bold(str(i))}) {p.get('name') or '?'}  {_dim(p.get('base_url') or '')}")
+        slug = p.get("slug")
+        name = p.get("name") or "?"
+        label = f"{name} ({slug})" if slug else name
+        print(f"  {_bold(str(i))}) {label}  {_dim(p.get('base_url') or '')}")
     new_idx = len(projects) + 1
     print(f"  {_bold(str(new_idx))}) {_green('create new project')}")
     choice = _input_line("Enter number: ")
@@ -769,7 +772,7 @@ def _print_scan_summary(scan: dict[str, Any], findings: list[dict[str, Any]]) ->
 
 def _cmd_scan(client: LiveAPISec, args: argparse.Namespace) -> int:
     if not args.project:
-        print("error: --project (project_id) is required", file=sys.stderr)
+        print("error: --project (id or slug) is required", file=sys.stderr)
         return 2
     scan = client.trigger_scan(
         args.project,
@@ -943,7 +946,7 @@ def _cmd_hacker(client: LiveAPISec, args: argparse.Namespace) -> int:
     targets need a verified domain; localhost / private IPs are exempt.
     """
     if not args.project:
-        print("error: --project (project_id) is required", file=sys.stderr)
+        print("error: --project (id or slug) is required", file=sys.stderr)
         return 2
     if not args.env:
         print(
@@ -988,7 +991,7 @@ def _cmd_hacker(client: LiveAPISec, args: argparse.Namespace) -> int:
 
 def _cmd_status(client: LiveAPISec, args: argparse.Namespace) -> int:
     if not args.project:
-        print("error: --project (project_id) is required", file=sys.stderr)
+        print("error: --project (id or slug) is required", file=sys.stderr)
         return 2
     project = client.get_project(args.project)
     scans = client.list_scans(args.project)
@@ -998,6 +1001,9 @@ def _cmd_status(client: LiveAPISec, args: argparse.Namespace) -> int:
     print(
         f"project {project['project_id']}: {project.get('name')} — {project.get('endpoints_count')} endpoints"
     )
+    if project.get("slug"):
+        # TODO 2.61: slug = zamiennik id w `--project` (i segment /trust/<slug>).
+        print(f"  slug: {project['slug']}")
     if project.get("base_url"):
         print(f"  base_url: {project['base_url']}")
     if project.get("last_scan_at"):
@@ -1014,7 +1020,7 @@ def _cmd_status(client: LiveAPISec, args: argparse.Namespace) -> int:
 def _cmd_scans(client: LiveAPISec, args: argparse.Namespace) -> int:
     """List scan history for a project — lets a Copilot/agent see every test result."""
     if not args.project:
-        print("error: --project (project_id) is required", file=sys.stderr)
+        print("error: --project (id or slug) is required", file=sys.stderr)
         return 2
     scans = client.list_scans(args.project)
     if args.json:
@@ -1146,7 +1152,7 @@ def _cmd_all(client: LiveAPISec, args: argparse.Namespace) -> int:
     from liveapisec.client import LiveAPISecError
 
     if not args.project:
-        print("error: --project (project_id) is required", file=sys.stderr)
+        print("error: --project (id or slug) is required", file=sys.stderr)
         return 2
     fail_on = args.fail_on or "high"
     hacker = bool(getattr(args, "hacker", False))
@@ -1714,7 +1720,7 @@ def _cmd_certificate(client: LiveAPISec, args: argparse.Namespace) -> int:
         print(f"certificate PDF saved: {out} ({len(content)} bytes, variant={variant})")
         return 0
     data = client.get_certificate(
-        scope=getattr(args, "scope", "org") or "org",
+        scope="project",
         project=getattr(args, "project", None),
     )
     if args.json:
@@ -1755,10 +1761,13 @@ def _cmd_projects(client: LiveAPISec, args: argparse.Namespace) -> int:
 
     def _last_line(s: dict[str, Any]) -> str:
         name = s.get("name") or "?"
+        slug = s.get("slug")
+        # TODO 2.61: pokaż slug — można go używać zamiennie z id w `--project`.
+        label = f"{name} ({slug})" if slug else name
         url = s.get("base_url") or ""
         last = s.get("last_scan")
         if not last or not last.get("status"):
-            return f"  {name}  {_dim(url)}  {_dim('no test yet')}"
+            return f"  {label}  {_dim(url)}  {_dim('no test yet')}"
         status = last.get("status") or "?"
         parts = [f"last test: {_scan_status(status)}"]
         if last.get("tests_run") is not None:
@@ -1772,7 +1781,7 @@ def _cmd_projects(client: LiveAPISec, args: argparse.Namespace) -> int:
                 )
             )
             parts.append(f"{last['findings']} findings" + (f" ({sev_str})" if sev_str else ""))
-        return f"  {name}  {_dim(url)}  {_dim(' · '.join(parts))}"
+        return f"  {label}  {_dim(url)}  {_dim(' · '.join(parts))}"
 
     for p in sorted(projects, key=lambda x: (x.get("name") or "").lower()):
         print(_last_line(p))
@@ -1782,7 +1791,7 @@ def _cmd_projects(client: LiveAPISec, args: argparse.Namespace) -> int:
 def _cmd_project(client: LiveAPISec, args: argparse.Namespace) -> int:
     """Show one project (endpoints, URLs, last scan) — TODO 2.55."""
     if not args.project:
-        print("error: --project (project_id) is required", file=sys.stderr)
+        print("error: --project (id or slug) is required", file=sys.stderr)
         return 2
     project = client.get_project(args.project)
     if args.json:
@@ -1791,6 +1800,8 @@ def _cmd_project(client: LiveAPISec, args: argparse.Namespace) -> int:
     print(
         f"project {project['project_id']}: {project.get('name')} — {project.get('endpoints_count')} endpoints"
     )
+    if project.get("slug"):
+        print(f"  slug: {project['slug']}")
     if project.get("base_url"):
         print(f"  base_url: {project['base_url']}")
     print(f"  source: {project.get('source')}  last_scan_at: {project.get('last_scan_at')}")
@@ -1847,7 +1858,7 @@ def _cmd_urls(client: LiveAPISec, args: argparse.Namespace) -> int:
     (`latest` albo snapshot), harmonogram i stan `paused`.
     """
     if not args.project:
-        print("error: --project (project_id) is required", file=sys.stderr)
+        print("error: --project (id or slug) is required", file=sys.stderr)
         return 2
     action = getattr(args, "action", "list") or "list"
 
@@ -1955,7 +1966,7 @@ def _cmd_urls(client: LiveAPISec, args: argparse.Namespace) -> int:
 def _cmd_versions(client: LiveAPISec, args: argparse.Namespace) -> int:
     """Lista wersji specyfikacji projektu — do przypinania na URL-ach (TODO 2.50)."""
     if not args.project:
-        print("error: --project (project_id) is required", file=sys.stderr)
+        print("error: --project (id or slug) is required", file=sys.stderr)
         return 2
     versions = client.list_versions(args.project)
     if args.json:
@@ -2009,7 +2020,7 @@ def _cmd_credentials(client: LiveAPISec, args: argparse.Namespace) -> int:
     `/developers`, a Clerk na resztę — jeden skan dobiera właściwy per ścieżka.
     """
     if not args.project:
-        print("error: --project (project_id) is required", file=sys.stderr)
+        print("error: --project (id or slug) is required", file=sys.stderr)
         return 2
     action = getattr(args, "action", "list") or "list"
     if action == "list":
@@ -2103,7 +2114,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--spec-file",
         help="local OpenAPI file (JSON/YAML) — parsed locally, server fetches nothing (no SSRF block)",
     )
-    p_push.add_argument("--project", help="existing project_id to update (PUT)")
+    p_push.add_argument("--project", help="project id or slug")
     p_push.add_argument(
         "--verify",
         action="store_true",
@@ -2152,7 +2163,7 @@ def build_parser() -> argparse.ArgumentParser:
         choices=["external", "internal"],
         help="external = scheduler may auto-test; internal = on-demand only via CLI",
     )
-    p_code.add_argument("--project", help="existing project_id to update (PUT)")
+    p_code.add_argument("--project", help="project id or slug")
     p_code.add_argument("--dry-run", action="store_true", help="scan locally + list endpoints, do not push (no key needed)")
     p_code.add_argument(
         "--verify",
@@ -2164,7 +2175,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_code.set_defaults(func=_cmd_scan_code)
 
     p_scan = sub.add_parser("scan", help="run a security scan (optionally wait + gate)")
-    p_scan.add_argument("--project", required=True)
+    p_scan.add_argument("--project", required=True, help="project id or slug")
     p_scan.add_argument("--branch")
     p_scan.add_argument("--commit")
     p_scan.add_argument("--wait", action="store_true", help="poll until finished")
@@ -2192,7 +2203,7 @@ def build_parser() -> argparse.ArgumentParser:
         "hacker",
         help="run an autonomous AI hacker-mode test (dev/staging only; localhost exempt)",
     )
-    p_hacker.add_argument("--project", required=True)
+    p_hacker.add_argument("--project", required=True, help="project id or slug")
     p_hacker.add_argument(
         "--env", required=True, help="environment name, e.g. development or staging"
     )
@@ -2228,18 +2239,18 @@ def build_parser() -> argparse.ArgumentParser:
     p_hacker.set_defaults(func=_cmd_hacker)
 
     p_status = sub.add_parser("status", help="project status + recent scans")
-    p_status.add_argument("--project", required=True)
+    p_status.add_argument("--project", required=True, help="project id or slug")
     _json_flag(p_status)
     p_status.set_defaults(func=_cmd_status)
 
     p_scans = sub.add_parser("scans", help="list security test (scan) history for a project")
-    p_scans.add_argument("--project", required=True)
+    p_scans.add_argument("--project", required=True, help="project id or slug")
     p_scans.add_argument("--limit", type=int, default=20, help="max rows to show (default: 20)")
     _json_flag(p_scans)
     p_scans.set_defaults(func=_cmd_scans)
 
     p_find = sub.add_parser("findings", help="list findings for a scan")
-    p_find.add_argument("--project", required=True)
+    p_find.add_argument("--project", required=True, help="project id or slug")
     p_find.add_argument("--scan", required=True)
     _json_flag(p_find)
     p_find.set_defaults(func=_cmd_findings)
@@ -2247,7 +2258,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_verdict = sub.add_parser(
         "verdict", help="CI regression gate: new/fixed vs baseline (exit 1 on regressions)"
     )
-    p_verdict.add_argument("--project", required=True)
+    p_verdict.add_argument("--project", required=True, help="project id or slug")
     p_verdict.add_argument("--scan", required=True, help="current scan id")
     p_verdict.add_argument("--baseline", required=True, help="baseline scan id")
     p_verdict.add_argument(
@@ -2262,13 +2273,13 @@ def build_parser() -> argparse.ArgumentParser:
     p_compliance = sub.add_parser(
         "compliance", help="compliance mapping: PCI DSS / SOC 2 / ISO 27001 / GDPR / NIS2 (SaaS+)"
     )
-    p_compliance.add_argument("--project", required=True)
+    p_compliance.add_argument("--project", required=True, help="project id or slug")
     p_compliance.add_argument("--scan", required=True)
     _json_flag(p_compliance)
     p_compliance.set_defaults(func=_cmd_compliance)
 
     p_report = sub.add_parser("report", help="full saved scan report (print or save)")
-    p_report.add_argument("--project", required=True)
+    p_report.add_argument("--project", required=True, help="project id or slug")
     p_report.add_argument("--scan", required=True)
     p_report.add_argument(
         "-o", "--output", default=None, help="save to file (default: liveapisec-report-<scan>.json|.md)"
@@ -2282,7 +2293,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_all = sub.add_parser(
         "all", help="full pipeline: scan → verdict → compliance → report → certificate PDF"
     )
-    p_all.add_argument("--project", required=True)
+    p_all.add_argument("--project", required=True, help="project id or slug")
     p_all.add_argument("--baseline", default=None, help="baseline scan id (default: previous completed scan)")
     p_all.add_argument("--fail-on", choices=_SEV, default="high")
     p_all.add_argument("--branch", default=None)
@@ -2308,13 +2319,13 @@ def build_parser() -> argparse.ArgumentParser:
     ask_sub = p_ask.add_subparsers(dest="ask_command", required=True)
 
     p_ask_new = ask_sub.add_parser("new", help="new question session for a project (bank 270 + AI)")
-    p_ask_new.add_argument("--project", required=True)
+    p_ask_new.add_argument("--project", required=True, help="project id or slug")
     p_ask_new.add_argument("--no-ai", action="store_true", help="bank only, no AI questions")
     _json_flag(p_ask_new)
     p_ask_new.set_defaults(func=_cmd_ask_new)
 
     p_ask_ls = ask_sub.add_parser("sessions", help="list question sessions of a project")
-    p_ask_ls.add_argument("--project", required=True)
+    p_ask_ls.add_argument("--project", required=True, help="project id or slug")
     _json_flag(p_ask_ls)
     p_ask_ls.set_defaults(func=_cmd_ask_sessions)
 
@@ -2357,7 +2368,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_ask_fu.set_defaults(func=_cmd_ask_followup)
 
     p_project = sub.add_parser("project", help="show a project (endpoints, URLs, last scan)")
-    p_project.add_argument("--project", required=True)
+    p_project.add_argument("--project", required=True, help="project id or slug")
     _json_flag(p_project)
     p_project.set_defaults(func=_cmd_project)
 
@@ -2368,7 +2379,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_urls.add_argument(
         "action", nargs="?", choices=["list", "add", "set", "rm"], default="list"
     )
-    p_urls.add_argument("--project", required=True)
+    p_urls.add_argument("--project", required=True, help="project id or slug")
     p_urls.add_argument("--name", help="URL/environment name (add/set/rm)")
     p_urls.add_argument("--url", dest="base_url", help="target address (add/set)")
     p_urls.add_argument(
@@ -2397,14 +2408,14 @@ def build_parser() -> argparse.ArgumentParser:
     p_versions = sub.add_parser(
         "versions", help="list spec versions of a project (to pin on a URL)"
     )
-    p_versions.add_argument("--project", required=True)
+    p_versions.add_argument("--project", required=True, help="project id or slug")
     _json_flag(p_versions)
     p_versions.set_defaults(func=_cmd_versions)
 
     p_delete = sub.add_parser(
         "delete", help="delete a project (and all its data)"
     )
-    p_delete.add_argument("--project", help="project id to delete")
+    p_delete.add_argument("--project", help="project id or slug")
     p_delete.add_argument("--yes", action="store_true", help="skip confirmation prompt")
     p_delete.set_defaults(func=_cmd_delete)
 
@@ -2412,7 +2423,7 @@ def build_parser() -> argparse.ArgumentParser:
         "credentials", help="manage project credentials per-prefix (different auth per route group)"
     )
     p_creds.add_argument("action", nargs="?", choices=["list", "set", "rm"], default="list")
-    p_creds.add_argument("--project", required=True)
+    p_creds.add_argument("--project", required=True, help="project id or slug")
     p_creds.add_argument("--slot", help="credential slot, e.g. a / b / devkey")
     p_creds.add_argument(
         "--path", help="path prefix this credential applies to, e.g. /developers (default: all)"
@@ -2459,7 +2470,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_connect = sub.add_parser(
         "connect", help="reverse tunnel — act as a proxy for scans against localhost/internal"
     )
-    p_connect.add_argument("--project", required=True, help="project id (from `liveapisec projects`)")
+    p_connect.add_argument("--project", required=True, help="project id or slug")
     p_connect.add_argument(
         "--poll-timeout", type=int, default=25, help="long-poll window in seconds (default 25)"
     )
@@ -2471,13 +2482,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_cert.add_argument(
         "--type", choices=["badge", "banner", "card", "iframe"], default="badge"
     )
-    p_cert.add_argument(
-        "--scope",
-        choices=["org", "project"],
-        default="org",
-        help="what the certificate covers (default: org)",
-    )
-    p_cert.add_argument("--project", help="project id (scope=project)")
+    # TODO 2.60: certyfikat jest per projekt (slug należy do projektu); nie ma
+    # już sluga organizacji ani scope=org.
+    p_cert.add_argument("--project", required=True, help="project id or slug")
     p_cert.add_argument(
         "--url",
         default=None,

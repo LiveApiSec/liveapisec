@@ -1482,6 +1482,56 @@ def test_cli_sites_shows_url_versions(capsys) -> None:
     assert "dev: https://d  [schedule=6h]" in out
 
 
+def test_cli_project_shows_slug(capsys) -> None:
+    """TODO 2.61: `liveapisec project` pokazuje slug (id i slug są zamienne)."""
+    from liveapisec.cli import _cmd_project
+
+    class Client:
+        def get_project(self, ref):
+            # slug jest przekazywany do API bez zmian — backend go rozwiązuje.
+            assert ref == "api-a"
+            return {
+                "project_id": "65f000000000000000000000",
+                "slug": "api-a",
+                "name": "api-a",
+                "endpoints_count": 1,
+                "base_url": "https://a.test",
+            }
+
+    class Args:
+        json = False
+        project = "api-a"
+
+    assert _cmd_project(Client(), Args()) == 0
+    out = capsys.readouterr().out
+    assert "slug: api-a" in out
+
+
+def test_cli_projects_shows_slug(capsys) -> None:
+    """TODO 2.61: `liveapisec projects` pokazuje slug przy nazwie."""
+    from liveapisec.cli import _cmd_projects
+
+    class Client:
+        def list_projects(self):
+            return [
+                {
+                    "project_id": "a",
+                    "name": "api-a",
+                    "slug": "api-a",
+                    "base_url": "https://a.test",
+                    "last_scan": None,
+                }
+            ]
+
+    class Args:
+        project = None
+        json = False
+
+    assert _cmd_projects(Client(), Args()) == 0
+    out = capsys.readouterr().out
+    assert "api-a (api-a)" in out
+
+
 def test_cli_versions_lists_and_marks(capsys) -> None:
     from liveapisec.cli import _cmd_versions
 

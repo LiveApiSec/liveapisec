@@ -156,8 +156,11 @@ class LiveAPISec:
         """All projects for the API key's org."""
         return self._request("GET", "/developers/projects")
 
-    def get_certificate(self, scope: str = "org", project: str | None = None) -> dict[str, Any]:
-        """Certificate / Trust Page in a chosen scope (org | project)."""
+    def get_certificate(self, scope: str = "project", project: str | None = None) -> dict[str, Any]:
+        """Certificate / Trust Page for a project (TODO 2.60/2.61).
+
+        `project` may be an ObjectId or a slug.
+        """
         params: dict[str, str] = {"scope": scope}
         if project:
             params["project"] = project
