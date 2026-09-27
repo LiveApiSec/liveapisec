@@ -676,14 +676,13 @@ liveapisec projects --project svc
 
 ### 9. `certificate` — live certificate URL + embed snippet
 
-After a scan is green, publish the live certificate. Choose the scope: whole
-organisation (default), one project, or a single URL.
+After a scan is green, publish the live certificate for a project (identified by
+its ObjectId or slug).
 
 ```bash
-liveapisec certificate                                  # whole organisation
-liveapisec certificate --scope project --project acme
-liveapisec certificate --scope project --project PROJECT_ID
-liveapisec certificate --type badge   # badge | banner | card | iframe
+liveapisec certificate --project acme          # slug works directly
+liveapisec certificate --project PROJECT_ID    # or the project ObjectId
+liveapisec certificate --project PROJECT_ID --type badge   # badge | banner | card | iframe
 
 # which URL the PUBLIC project certificate concerns (not shown publicly):
 liveapisec certificate --project PROJECT_ID --url production

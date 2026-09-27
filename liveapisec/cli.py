@@ -1993,7 +1993,7 @@ def _cmd_delete(client: LiveAPISec, args: argparse.Namespace) -> int:
     """Usuń projekt (i wszystkie jego dane) — TODO 2.50/2.55."""
     project = getattr(args, "project", None)
     if not project:
-        print("error: --project (project id) is required", file=sys.stderr)
+        print("error: --project (id or slug) is required", file=sys.stderr)
         return 2
     target = f"project {project}"
     if not getattr(args, "yes", False):
