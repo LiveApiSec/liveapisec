@@ -842,6 +842,51 @@ _HOP_HEADERS = {
 }
 
 
+def _cmd_llm(client: LiveAPISec, args: argparse.Namespace) -> int:
+    """Instrukcje dla asystentów AI (llms.txt) albo pełna dokumentacja
+    (llms-full.txt) — to samo, co na https://liveapisec.com/docs.
+
+    Publiczne (bez klucza API). `--project` dokleja kontekst projektu, żeby
+    asystent od razu wiedział, o który projekt chodzi.
+    """
+    text = client.get_llm_instructions(
+        full=bool(getattr(args, "full", False)),
+        site_url=getattr(args, "url", None),
+    )
+    project_ref = getattr(args, "project", None)
+    if project_ref:
+        proj = client.get_project(project_ref)
+        ctx: list[str] = []
+        if proj.get("name"):
+            ctx.append(f"- Project name: {proj['name']}")
+        if proj.get("project_id"):
+            ctx.append(f"- PROJECT_ID: {proj['project_id']}")
+        if proj.get("slug"):
+            ctx.append(f"- slug: {proj['slug']}")
+        if proj.get("base_url"):
+            ctx.append(f"- Base URL: {proj['base_url']}")
+        if ctx:
+            text = (
+                "Known context (this API is already registered on LiveAPISec — reuse it, "
+                "do NOT create a duplicate project; use the PROJECT_ID below):\n"
+                + "\n".join(ctx)
+                + "\n\n"
+                + text
+            )
+    save = getattr(args, "save", None)
+    if save:
+        data = text if text.endswith("\n") else text + "\n"
+        with open(save, "w", encoding="utf-8") as fh:
+            fh.write(data)
+        print(_green(f"{_OK} saved {len(data)} chars → {save}"))
+        return 0
+    if args.json:
+        print(LiveAPISec.dump({"full": bool(getattr(args, "full", False)), "text": text}))
+    else:
+        print(text)
+    return 0
+
+
 def _scan_wait_timeout(args: argparse.Namespace) -> float:
     """Okno `--wait`. Tunel: dłużej (heartbeat + wolne requesty lokalne), 1h."""
     return 3600.0 if getattr(args, "tunnel", False) else 600.0
@@ -2533,11 +2578,27 @@ def build_parser() -> argparse.ArgumentParser:
     _json_flag(p_cert)
     p_cert.set_defaults(func=_cmd_certificate)
 
+    p_llm = sub.add_parser(
+        "llm", help="download the AI-assistant instructions & full docs (what's on /docs)"
+    )
+    p_llm.add_argument(
+        "--full",
+        action="store_true",
+        help="full documentation (llms-full.txt) instead of the short task prompt",
+    )
+    p_llm.add_argument(
+        "--save", metavar="FILE", help="write to FILE (e.g. --save AGENTS.md) instead of printing"
+    )
+    p_llm.add_argument("--project", help="prepend 'Known context' for this project (id or slug)")
+    p_llm.add_argument("--url", help="docs site base URL (default https://liveapisec.com)")
+    _json_flag(p_llm)
+    p_llm.set_defaults(func=_cmd_llm)
+
     return parser
 
 
 def _needs_key(args: argparse.Namespace) -> bool:
-    if args.command in ("config", "login", "logout"):
+    if args.command in ("config", "login", "logout", "llm"):
         return False
     return not (args.command in ("scan-code", "push-code") and getattr(args, "dry_run", False))
 

@@ -730,10 +730,33 @@ Only the project's `base_url` host is forwarded (not an open proxy).
 - `scan --wait --tunnel` uses a longer wait window (1 h) so it doesn't give up
   before the scan finishes.
 
+### 18. `llm` — download the AI-assistant instructions & full docs
+
+The instruction block for AI assistants (section above) and the full `/docs`
+page are also plain text/URLs, so an agent can fetch them itself:
+
+```bash
+liveapisec llm                            # short task prompt (same as the copy-paste block)
+liveapisec llm --project payments-api     # + PROJECT_ID / slug / base URL context
+liveapisec llm --full                     # the whole documentation as markdown
+liveapisec llm --full --save AGENTS.md    # write it into your repo for the agent
+```
+
+Public — **no API key required** (only `--project` needs a key). `--url`
+overrides the docs site base (default `https://liveapisec.com`, or
+`LIVEAPISEC_SITE_URL`). Same content, without the CLI:
+
+```bash
+curl -s https://liveapisec.com/llms.txt         # short prompt
+curl -s https://liveapisec.com/llms-full.txt    # full docs (generated from /docs)
+```
+
 ---
 
 > **Full documentation:** see the in-browser docs at **https://liveapisec.com/docs**
 > (install, config, every command, auth/OAuth2, exit codes, GitHub Actions, SDK).
+> Machine-readable: **https://liveapisec.com/llms.txt** /
+> **https://liveapisec.com/llms-full.txt**.
 
 ---
 
@@ -846,6 +869,11 @@ curl -X POST $LIVEAPISEC_API_URL/developers/projects/$PROJECT_ID/scans \
 
 Copy-paste the block below into your AI assistant (GitHub Copilot, Cursor,
 Windsurf…) to let it use the LiveAPISec CLI on your behalf.
+
+> Keep it up to date automatically: `liveapisec llm --project <id-or-slug>`
+> prints this block (with your project context), `liveapisec llm --full` adds
+> the whole `/docs` page. The same text is served at
+> **https://liveapisec.com/llms.txt** and **https://liveapisec.com/llms-full.txt**.
 
 ````markdown
 You can use the `liveapisec` CLI (https://pypi.org/project/liveapisec/) to

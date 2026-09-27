@@ -166,6 +166,29 @@ class LiveAPISec:
         """All projects for the API key's org."""
         return self._request("GET", "/developers/projects")
 
+    # -- LLM/AI-assistant instructions (public docs, no API key needed) -------
+    def get_llm_instructions(self, *, full: bool = False, site_url: str | None = None) -> str:
+        """Download the AI-assistant instructions from the public site.
+
+        `full=False` → `/llms.txt` (short task prompt), `full=True` →
+        `/llms-full.txt` (the whole documentation, generated from /docs).
+        Public — no API key required. Base overridable via `LIVEAPISEC_SITE_URL`.
+        """
+        base = (
+            site_url or os.environ.get("LIVEAPISEC_SITE_URL") or DEFAULT_FRONTEND_URL
+        ).rstrip("/")
+        path = "/llms-full.txt" if full else "/llms.txt"
+        try:
+            with httpx.Client(transport=self._transport) as client:
+                resp = client.get(f"{base}{path}", timeout=self.timeout)
+        except httpx.HTTPError as exc:
+            raise LiveAPISecError(None, "Connection error", str(exc)) from exc
+        if resp.status_code >= 400:
+            raise LiveAPISecError(
+                resp.status_code, "Docs error", f"{base}{path} → HTTP {resp.status_code}"
+            )
+        return resp.text
+
     def get_certificate(self, scope: str = "project", project: str | None = None) -> dict[str, Any]:
         """Certificate / Trust Page for a project (TODO 2.60/2.61).
 

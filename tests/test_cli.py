@@ -10,6 +10,7 @@ import pytest
 from liveapisec.cli import (
     _build_auth,
     _cmd_findings,
+    _cmd_llm,
     _cmd_push,
     _cmd_scan,
     _cmd_urls,
@@ -1933,3 +1934,80 @@ def test_cli_urls_list_shows_notify_state(capsys) -> None:
     out = capsys.readouterr().out
     assert "notify=error(1 email)" in out
     assert "notify=off" in out
+
+
+# --- `liveapisec llm` (instrukcje dla asystentów AI / pełna dokumentacja) -----
+
+
+class _LlmArgs:
+    def __init__(self, **kw):
+        self.command = kw.get("command", "llm")
+        self.full = kw.get("full", False)
+        self.save = kw.get("save", None)
+        self.project = kw.get("project", None)
+        self.url = kw.get("url", None)
+        self.json = kw.get("json", False)
+
+
+def test_cmd_llm_prints_short_prompt(capsys) -> None:
+    calls = {}
+
+    class Client:
+        def get_llm_instructions(self, *, full=False, site_url=None):
+            calls["full"] = full
+            calls["site_url"] = site_url
+            return "PROMPT FOR AI\n"
+
+    assert _cmd_llm(Client(), _LlmArgs()) == 0
+    out = capsys.readouterr().out
+    assert "PROMPT FOR AI" in out
+    assert calls == {"full": False, "site_url": None}
+
+
+def test_cmd_llm_full_save_with_project_context(tmp_path, capsys) -> None:
+    calls = {}
+
+    class Client:
+        def get_llm_instructions(self, *, full=False, site_url=None):
+            calls["full"] = full
+            calls["site_url"] = site_url
+            return "FULL DOCS"
+
+        def get_project(self, ref):
+            calls["ref"] = ref
+            return {
+                "project_id": "65f000000000000000000001",
+                "name": "payments-api",
+                "slug": "payments-api",
+                "base_url": "https://api.example.com",
+            }
+
+    dest = tmp_path / "AGENTS.md"
+    rc = _cmd_llm(
+        Client(),
+        _LlmArgs(full=True, save=str(dest), project="payments-api", url="https://x.test/"),
+    )
+    assert rc == 0
+    assert calls == {"full": True, "site_url": "https://x.test/", "ref": "payments-api"}
+    body = dest.read_text(encoding="utf-8")
+    assert body.startswith("Known context")
+    assert "PROJECT_ID: 65f000000000000000000001" in body
+    assert "slug: payments-api" in body
+    assert "FULL DOCS" in body
+    assert "saved" in capsys.readouterr().out
+
+
+def test_cmd_llm_json(capsys) -> None:
+    class Client:
+        def get_llm_instructions(self, *, full=False, site_url=None):
+            return "hello"
+
+    assert _cmd_llm(Client(), _LlmArgs(json=True)) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload == {"full": False, "text": "hello"}
+
+
+def test_llm_command_does_not_need_api_key() -> None:
+    from liveapisec.cli import _needs_key
+
+    assert _needs_key(_LlmArgs()) is False
