@@ -716,6 +716,20 @@ liveapisec hacker --project PROJECT_ID --env development --wait --tunnel
 
 Only the project's `base_url` host is forwarded (not an open proxy).
 
+**Robustness (2.62):** the tunnel is resilient to the usual flakiness:
+- **Reconnect keeps the same `tunnel_id`** — if the CLI restarts, it *resumes* the
+  existing tunnel for the project, so an in-flight scan is not orphaned (no more
+  "each restart = new tunnel_id = broken job"). Start it again and the worker
+  keeps using the same queue.
+- **Transient errors are retried** — `connect` backs off and retries on `429`/
+  `5xx`/network/Cloudflare challenges (honouring `Retry-After`). It only exits on
+  `Ctrl+C` or a real auth error (`401`/`403`).
+- **Heartbeat + fail-fast** — the CLI refreshes a heartbeat on every poll; if it
+  dies, the scan is aborted quickly with `tunnel disconnected` instead of hanging
+  until the 30-minute `stale` timeout.
+- `scan --wait --tunnel` uses a longer wait window (1 h) so it doesn't give up
+  before the scan finishes.
+
 ---
 
 > **Full documentation:** see the in-browser docs at **https://liveapisec.com/docs**

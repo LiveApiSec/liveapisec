@@ -535,7 +535,7 @@ class _GateClient:
     ):
         return {"scan_id": "s1", "status": "queued"}
 
-    def wait_for_scan(self, project_id, scan_id):
+    def wait_for_scan(self, project_id, scan_id, timeout=None):
         return {
             "scan_id": "s1",
             "status": "completed",
@@ -897,6 +897,64 @@ def test_cmd_connect_forwards_one_request(monkeypatch, capsys) -> None:
     assert got["result"]["status"] == 200
     assert base64.b64decode(got["result"]["body"]) == b'{"ok":true}'
     assert "localhost:8000" in got["result"]["headers"].get("host", "") or True
+
+
+def test_cmd_connect_retries_transient_error(monkeypatch) -> None:
+    """429/5xx NIE zamyka tunelu — CLI robi backoff i ponawia (skończony skan)."""
+    from typing import ClassVar
+
+    import httpx as _httpx
+
+    from liveapisec.cli import _cmd_connect
+    from liveapisec.client import LiveAPISecError
+
+    class FakeResp:
+        status_code = 200
+        headers: ClassVar[dict[str, str]] = {"content-type": "application/json"}
+        content = b"{}"
+
+    class FakeClient:
+        def __init__(self, *a, **k): ...
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def request(self, *a, **k):
+            return FakeResp()
+
+    monkeypatch.setattr(_httpx, "Client", FakeClient)
+    # nie czekamy realnie w backoffie
+    monkeypatch.setattr("liveapisec.cli.time.sleep", lambda *_: None)
+
+    calls = {"n": 0}
+    closed = {"v": False}
+
+    class Client:
+        def open_tunnel(self, project_id):
+            return {"tunnel_id": "t1", "project_id": project_id,
+                    "base_url": "http://localhost:8000"}
+
+        def tunnel_next(self, tunnel_id, timeout=25):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise LiveAPISecError(429, "Too Many Requests", "slow down", retry_after=None)
+            raise KeyboardInterrupt
+
+        def tunnel_result(self, tunnel_id, result): ...
+
+        def close_tunnel(self, tunnel_id):
+            closed["v"] = True
+
+    class Args:
+        project = "s1"
+        poll_timeout = 1
+
+    assert _cmd_connect(Client(), Args()) == 0
+    assert calls["n"] >= 2      # 429 → ponowienie, a nie wyjście/zamknięcie
+    assert closed["v"] is True  # tunel domknięty dopiero przy Ctrl+C
 
 
 def test_create_project_sends_schedule_and_access() -> None:

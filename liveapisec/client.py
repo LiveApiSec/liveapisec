@@ -40,11 +40,15 @@ def severity_rank(severity: str) -> int:
 class LiveAPISecError(RuntimeError):
     """API error: HTTP status + title/detail (RFC 7807)."""
 
-    def __init__(self, status: int | None, title: str, detail: str = "") -> None:
+    def __init__(
+        self, status: int | None, title: str, detail: str = "",
+        retry_after: float | None = None,
+    ) -> None:
         super().__init__(f"{title}: {detail}".strip(" :"))
         self.status = status
         self.title = title
         self.detail = detail
+        self.retry_after = retry_after  # z nagłówka Retry-After (429) — do backoffu
 
 
 class ScanStatus:
@@ -108,7 +112,13 @@ class LiveAPISec:
                 detail = body.get("detail", resp.text[:300])
             except Exception:  # noqa: BLE001
                 title, detail = "Error", resp.text[:300]
-            raise LiveAPISecError(resp.status_code, title, detail)
+            retry_after: float | None = None
+            if resp.status_code == 429:
+                try:
+                    retry_after = float(resp.headers.get("retry-after") or 0) or None
+                except (TypeError, ValueError):
+                    retry_after = None
+            raise LiveAPISecError(resp.status_code, title, detail, retry_after=retry_after)
         if resp.status_code == 204 or not resp.content:
             return None
         return resp.json()

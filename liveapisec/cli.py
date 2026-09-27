@@ -795,7 +795,7 @@ def _cmd_scan(client: LiveAPISec, args: argparse.Namespace) -> int:
 
     if not args.json:
         print("waiting for scan to finish…", file=sys.stderr)
-    done = client.wait_for_scan(args.project, scan_id)
+    done = client.wait_for_scan(args.project, scan_id, timeout=_scan_wait_timeout(args))
     findings = done.get("findings") or []
     if args.json:
         print(LiveAPISec.dump(done))
@@ -842,6 +842,11 @@ _HOP_HEADERS = {
 }
 
 
+def _scan_wait_timeout(args: argparse.Namespace) -> float:
+    """Okno `--wait`. Tunel: dłużej (heartbeat + wolne requesty lokalne), 1h."""
+    return 3600.0 if getattr(args, "tunnel", False) else 600.0
+
+
 def _cmd_connect(client: LiveAPISec, args: argparse.Namespace) -> int:
     """Reverse tunnel: CLI wykonuje requesty skanu lokalnie (localhost/wewnętrzne).
 
@@ -859,15 +864,37 @@ def _cmd_connect(client: LiveAPISec, args: argparse.Namespace) -> int:
     allowed_host = httpx.URL(base).host if base else None
     print(_green(f"{_OK} tunnel open for project {args.project}") + (f"  → {base}" if base else ""))
     print(_dim(f"  tunnel_id: {tunnel_id}"))
+    if opening.get("resumed"):
+        print(_dim("  (resumed an existing tunnel — in-flight scan keeps running)"))
     if allowed_host:
         print(_dim(f"  forwarding only to host: {allowed_host}"))
     print(_dim("waiting for scan requests… (Ctrl+C to stop)"), file=sys.stderr)
 
     poll = int(getattr(args, "poll_timeout", 25) or 25)
+    backoff = 1.0
     try:
         with httpx.Client(follow_redirects=False, timeout=30.0) as hc:
             while True:
-                req = client.tunnel_next(tunnel_id, timeout=poll)
+                try:
+                    req = client.tunnel_next(tunnel_id, timeout=poll)
+                except LiveAPISecError as exc:
+                    # 401/403 = zły klucz/scope → ponawianie bez sensu. Reszta
+                    # (429/5xx/sieć/CF challenge) = przejściowe → backoff, NIE
+                    # zamykamy tunelu (inaczej jeden 429 osieroca trwający skan).
+                    if exc.status in (401, 403):
+                        raise
+                    delay = exc.retry_after or backoff
+                    print(
+                        _dim(
+                            f"tunnel: transient error ({exc.status or 'network'})"
+                            f" — retry in {delay:.0f}s"
+                        ),
+                        file=sys.stderr,
+                    )
+                    time.sleep(delay)
+                    backoff = min(backoff * 2, 30.0)
+                    continue
+                backoff = 1.0
                 if not req:
                     continue
                 rid = req.get("request_id")
@@ -978,7 +1005,7 @@ def _cmd_hacker(client: LiveAPISec, args: argparse.Namespace) -> int:
 
     if not args.json:
         print("waiting for the AI agent to finish…", file=sys.stderr)
-    done = client.wait_for_scan(args.project, scan_id)
+    done = client.wait_for_scan(args.project, scan_id, timeout=_scan_wait_timeout(args))
     if args.json:
         print(LiveAPISec.dump(done))
     else:
@@ -1180,7 +1207,7 @@ def _cmd_all(client: LiveAPISec, args: argparse.Namespace) -> int:
         )
     scan_id = scan["scan_id"]
     print(f"scan queued: {scan_id} — waiting…", file=sys.stderr)
-    done = client.wait_for_scan(args.project, scan_id)
+    done = client.wait_for_scan(args.project, scan_id, timeout=_scan_wait_timeout(args))
     if not args.json:
         print(_fmt_scan(done))
     if done.get("status") != "completed":
