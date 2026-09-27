@@ -6,6 +6,7 @@ paste it once, on first run. The file is written with mode 0600.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 
@@ -51,5 +52,40 @@ def save_config(values: dict[str, str]) -> str:
 def clear_config() -> str:
     path = config_path()
     if os.path.exists(path):
+        os.remove(path)
+    return path
+
+
+# --- login (TODO 2.58) -------------------------------------------------------
+# Klucze zapisywane przez `liveapisec login` (device flow). Trzymamy metadane,
+# żeby `config`/`whoami` mogły pokazać organizację i datę wygaśnięcia.
+LOGIN_KEYS = (
+    "api_key",
+    "org_id",
+    "key_prefix",
+    "expires_at",
+    "authorized_at",
+    "scopes",
+)
+
+
+def save_login(values: dict[str, str]) -> str:
+    """Zapisuje token + metadane loginu (nie nadpisuje api_url, jeśli pusty)."""
+    return save_config({k: v for k, v in values.items() if k in LOGIN_KEYS and v})
+
+
+def clear_login() -> str:
+    """Usuwa token i metadane loginu, zachowuje `api_url`."""
+    path = config_path()
+    data = load_config()
+    for key in LOGIN_KEYS:
+        data.pop(key, None)
+    if data:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(data, fh, indent=2)
+        with contextlib.suppress(OSError):
+            os.chmod(path, 0o600)
+    elif os.path.exists(path):
         os.remove(path)
     return path

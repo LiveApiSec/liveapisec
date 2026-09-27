@@ -191,8 +191,11 @@ class LiveAPISec:
         base_url: str,
         version: str = "latest",
         schedule: str | None = None,
+        notify_emails: list[str] | None = None,
+        notify_when: str | None = None,
+        notify_slack_connector_ids: list[str] | None = None,
     ) -> dict[str, Any]:
-        """Add a URL (environment) to a project."""
+        """Add a URL (environment) to a project (TODO 2.56 — notify_* per URL)."""
         payload: dict[str, Any] = {
             "name": name,
             "base_url": base_url,
@@ -200,10 +203,16 @@ class LiveAPISec:
         }
         if schedule:
             payload["schedule"] = schedule
+        if notify_emails is not None:
+            payload["notify_emails"] = notify_emails
+        if notify_when is not None:
+            payload["notify_when"] = notify_when
+        if notify_slack_connector_ids is not None:
+            payload["notify_slack_connector_ids"] = notify_slack_connector_ids
         return self._request("POST", f"/developers/projects/{project_id}/environments", json=payload)
 
     def update_environment(self, project_id: str, name: str, **fields: Any) -> dict[str, Any]:
-        """Update a URL (base_url / version / schedule / paused)."""
+        """Update a URL (base_url / version / schedule / paused / notify_*)."""
         payload = {k: v for k, v in fields.items() if v is not None}
         return self._request(
             "PATCH", f"/developers/projects/{project_id}/environments/{name}", json=payload
@@ -475,3 +484,59 @@ class LiveAPISec:
     @staticmethod
     def dump(data: Any) -> str:
         return json.dumps(data, indent=2, ensure_ascii=False, default=str)
+
+    # -- CLI login / whoami (TODO 2.58) ---------------------------------------
+    def start_device_login(
+        self, client_name: str = "", client_os: str = ""
+    ) -> dict[str, Any]:
+        """Start device-flow login: returns device_code + user_code + URL.
+
+        Unauthenticated — this is how a fresh machine gets its first key. Never
+        sends an API key. `client_name`/`client_os` are shown on the approval
+        page so the user can tell which machine is asking.
+        """
+        return self._public_request(
+            "POST",
+            "/developers/cli/device",
+            json={"client_name": client_name, "client_os": client_os},
+        )
+
+    def poll_device_token(self, device_code: str) -> dict[str, Any]:
+        """Poll for the approved key (one-shot).
+
+        Raises `LiveAPISecError` with title `authorization_pending` while waiting —
+        the caller should keep polling on that title and stop on others.
+        """
+        return self._public_request(
+            "POST", "/developers/cli/token", json={"device_code": device_code}
+        )
+
+    def whoami(self) -> dict[str, Any]:
+        """Key identity: org, prefix, scopes, expiry (requires an API key)."""
+        return self._request("GET", "/developers/whoami")
+
+    def _public_request(self, method: str, path: str, **kw: Any) -> Any:
+        """Unauthenticated request (device-flow start/poll). Same error mapping."""
+        url = f"{self.api_url}{path}"
+        try:
+            with httpx.Client(transport=self._transport) as client:
+                resp = client.request(
+                    method,
+                    url,
+                    headers={"Content-Type": "application/json"},
+                    timeout=self.timeout,
+                    **kw,
+                )
+        except httpx.HTTPError as exc:
+            raise LiveAPISecError(None, "Connection error", str(exc)) from exc
+        if resp.status_code >= 400:
+            try:
+                body = resp.json()
+                title = body.get("title", "Error")
+                detail = body.get("detail", resp.text[:300])
+            except Exception:  # noqa: BLE001
+                title, detail = "Error", resp.text[:300]
+            raise LiveAPISecError(resp.status_code, title, detail)
+        if resp.status_code == 204 or not resp.content:
+            return None
+        return resp.json()

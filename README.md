@@ -82,7 +82,7 @@ pip install "liveapisec @ git+https://github.com/LiveApiSec/liveapisec.git"
 Verify:
 
 ```bash
-liveapisec --version     # e.g. liveapisec 0.1.39
+liveapisec --version     # e.g. liveapisec 0.1.40
 liveapisec --help
 ```
 
@@ -95,6 +95,49 @@ Install once (e.g. in a CI image, on a dev machine, in GitHub Actions) and the
 
 Generate an API key once in the dashboard: **Settings → Developer API → Create API key**
 (the `las_dev_...` key is shown only once — store it as a secret).
+
+### Log in like `aws` / `gcloud` (recommended for local dev)
+
+Instead of pasting a key, run:
+
+```bash
+liveapisec login
+```
+
+The CLI starts a **device flow** (AWS SSO / `gcloud auth login` style):
+
+1. it prints a one-time code and opens your browser at
+   `https://liveapisec.com/cli/authorize?code=XXXX-XXXX`,
+2. you sign in (Clerk) and click **Approve**,
+3. the CLI receives a fresh `las_dev_...` key and **saves it locally**.
+
+```
+$ liveapisec login
+  First, copy your one-time code:  WDJB-MJHT
+  Then open:  https://liveapisec.com/cli/authorize?code=WDJB-MJHT
+  (opened in your browser)
+
+Waiting for approval…  (Ctrl+C to cancel)
+
+✓ Logged in — acme
+  key:     las_dev_ab12…
+  scopes:  projects:read, projects:write, scans:trigger
+  expires: 2026-11-01
+✓ Token saved to /home/you/.config/liveapisec/config.json
+```
+
+Notes:
+- The login key **expires after 30 days**; when the CLI reports `API key expired`,
+  just run `liveapisec login` again.
+- Permissions can be limited on the approval page (read-only, etc.).
+- Headless / SSH? Add `--no-browser` (the URL is printed) or paste an existing key:
+  `liveapisec login --token las_dev_...`.
+- Signed in but no browser? Open the printed URL on any machine and type the code.
+
+```bash
+liveapisec whoami          # org, key prefix, scopes, expiry
+liveapisec logout          # remove the saved token (the key stays in the panel)
+```
 
 ### First run (interactive)
 
@@ -122,6 +165,14 @@ export LIVEAPISEC_API_URL=https://api.liveapisec.com   # optional (default; dash
 
 Precedence: `--api-key` / `--api-url` flags → environment variables →
 saved config file.
+
+Because the **environment variable wins over the saved login**, CI/CD is
+unaffected: keep putting `LIVEAPISEC_API_KEY` in your GitHub Actions / GitLab
+secrets and the pipeline never needs `liveapisec login` (which refuses to run
+non-interactively).
+
+> The saved file lives in your home directory (`~/.config/liveapisec/`), never
+> in your repository — do **not** commit it or paste its contents anywhere.
 
 ### Manage the saved key
 
@@ -539,6 +590,14 @@ liveapisec urls add --project PROJECT_ID --name prod --url https://api.example.c
 liveapisec urls set --project PROJECT_ID --name prod --version 1.0.3
 liveapisec urls set --project PROJECT_ID --name prod --schedule 24h
 liveapisec urls set --project PROJECT_ID --name prod --paused
+
+# notifications per URL (TODO 2.56): e-mail recipients + when to send
+liveapisec urls add --project PROJECT_ID --name prod --url https://api.example.com \
+  --notify-emails ops@example.com,dev@example.com --notify-when all
+liveapisec urls set --project PROJECT_ID --name prod --notify-when error   # only on findings
+liveapisec urls set --project PROJECT_ID --name prod --notify-when off     # pause alerts
+# Slack channels (Connectors) can also be attached per URL:
+liveapisec urls set --project PROJECT_ID --name prod --notify-slack CONNECTOR_ID
 
 # remove
 liveapisec urls rm --project PROJECT_ID --name dev

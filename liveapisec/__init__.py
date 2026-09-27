@@ -21,7 +21,7 @@ from .client import (
     severity_rank,
 )
 from .codegen import ScanResult, detect_framework, scan_code
-from .config import clear_config, config_path, load_config, save_config
+from .config import clear_config, clear_login, config_path, load_config, save_config, save_login
 
 __all__ = [
     "DEFAULT_API_URL",
@@ -31,11 +31,13 @@ __all__ = [
     "ScanStatus",
     "__version__",
     "clear_config",
+    "clear_login",
     "config_path",
     "detect_framework",
     "load_config",
     "main",
     "save_config",
+    "save_login",
     "scan_code",
     "severity_rank",
 ]

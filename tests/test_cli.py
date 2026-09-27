@@ -12,6 +12,7 @@ from liveapisec.cli import (
     _cmd_findings,
     _cmd_push,
     _cmd_scan,
+    _cmd_urls,
     _print_endpoints,
     _validate_auth,
     _verify_target,
@@ -1749,3 +1750,78 @@ def test_cli_version_flag_and_sources_in_sync(capsys) -> None:
         main(["--version"])
     assert exc.value.code == 0
     assert capsys.readouterr().out.strip() == f"liveapisec {__version__}"
+
+
+# --- TODO 2.56: CLI urls + notifications per URL -----------------------------
+def _urls_args(**kw):
+    import argparse
+
+    base = {
+        "project": "p1",
+        "name": "dev",
+        "base_url": "http://x.test",
+        "version": None,
+        "schedule": None,
+        "paused": False,
+        "json": False,
+        "action": "add",
+        "notify_emails": None,
+        "notify_when": None,
+        "notify_slack": None,
+    }
+    base.update(kw)
+    return argparse.Namespace(**base)
+
+
+def test_cli_urls_add_passes_notify(capsys) -> None:
+    captured: dict = {}
+
+    class Client:
+        def add_environment(self, project_id, name, base_url, **kw):
+            captured.update({"project_id": project_id, "name": name, "base_url": base_url, **kw})
+            return {"name": name, "base_url": base_url}
+
+    rc = _cmd_urls(
+        Client(),
+        _urls_args(
+            notify_emails="ops@example.com, sec@example.com",
+            notify_when="all",
+        ),
+    )
+    assert rc == 0
+    assert captured["notify_emails"] == ["ops@example.com", "sec@example.com"]
+    assert captured["notify_when"] == "all"
+    assert "notify: all" in capsys.readouterr().out
+
+
+def test_cli_urls_set_notify_off(capsys) -> None:
+    captured: dict = {}
+
+    class Client:
+        def update_environment(self, project_id, name, **kw):
+            captured.update(kw)
+            return {"name": name}
+
+    rc = _cmd_urls(
+        Client(),
+        _urls_args(action="set", name="dev", base_url=None, notify_when="off"),
+    )
+    assert rc == 0
+    assert captured["notify_when"] == "off"
+    capsys.readouterr()
+
+
+def test_cli_urls_list_shows_notify_state(capsys) -> None:
+    class Client:
+        def list_environments(self, project_id):
+            return [
+                {"name": "dev", "base_url": "http://x", "version": "latest",
+                 "notify_emails": ["a@b.c"], "notify_when": "error"},
+                {"name": "prod", "base_url": "http://y", "version": "latest",
+                 "notify_emails": ["a@b.c"], "notify_when": "off"},
+            ]
+
+    assert _cmd_urls(Client(), _urls_args(action="list")) == 0
+    out = capsys.readouterr().out
+    assert "notify=error(1 email)" in out
+    assert "notify=off" in out

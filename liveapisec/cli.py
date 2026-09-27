@@ -25,8 +25,13 @@ Exit codes (for CI):
 from __future__ import annotations
 
 import argparse
+import contextlib
 import os
+import platform
 import sys
+import time
+import webbrowser
+from datetime import datetime, timezone
 from typing import Any
 
 from ._version import __version__
@@ -39,7 +44,7 @@ from .client import (
     LiveAPISecError,
 )
 from .codegen import scan_code
-from .config import clear_config, config_path, load_config, save_config
+from .config import clear_config, clear_login, config_path, load_config, save_config, save_login
 
 _SEV = ["critical", "high", "medium", "low", "info"]
 
@@ -1862,8 +1867,19 @@ def _cmd_urls(client: LiveAPISec, args: argparse.Namespace) -> int:
                 flags.append(f"schedule={e['schedule']}")
             if e.get("paused"):
                 flags.append("paused")
+            # TODO 2.56 — powiadomienia per URL.
+            emails = e.get("notify_emails") or []
+            when = e.get("notify_when") or "error"
+            if when == "off":
+                flags.append("notify=off")
+            elif emails or e.get("notify_slack_connector_ids"):
+                flags.append(f"notify={when}({len(emails)} email)")
             print(f"  - {e.get('name')}: {e.get('base_url')}  [{', '.join(flags)}]")
         return 0
+
+    # TODO 2.56 — parsowanie flag powiadomień (comma separated).
+    notify_emails = [x.strip() for x in (getattr(args, "notify_emails", None) or "").split(",") if x.strip()]
+    notify_slack = [x.strip() for x in (getattr(args, "notify_slack", None) or "").split(",") if x.strip()]
 
     if action == "add":
         if not args.name or not args.base_url:
@@ -1876,11 +1892,17 @@ def _cmd_urls(client: LiveAPISec, args: argparse.Namespace) -> int:
                 args.base_url,
                 version=args.version or "latest",
                 schedule=args.schedule,
+                notify_emails=notify_emails or None,
+                notify_when=getattr(args, "notify_when", None),
+                notify_slack_connector_ids=notify_slack or None,
             )
         except Exception as exc:  # noqa: BLE001
             print(f"error: {exc}", file=sys.stderr)
             return 1
-        print(_green(f"{_OK} added URL '{env.get('name')}' → {env.get('base_url')}"))
+        extra = ""
+        if notify_emails:
+            extra = f"  (notify: {args.notify_when or 'error'} → {', '.join(notify_emails)})"
+        print(_green(f"{_OK} added URL '{env.get('name')}' → {env.get('base_url')}") + extra)
         return 0
 
     if action == "set":
@@ -1892,10 +1914,15 @@ def _cmd_urls(client: LiveAPISec, args: argparse.Namespace) -> int:
             "version": args.version,
             "schedule": args.schedule,
             "paused": True if args.paused else None,
+            # TODO 2.56 — powiadomienia per URL (tylko gdy podane).
+            "notify_emails": notify_emails or None,
+            "notify_when": getattr(args, "notify_when", None),
+            "notify_slack_connector_ids": notify_slack or None,
         }
         if all(v is None for v in fields.values()):
             print(
-                "error: urls set needs at least one of --url / --version / --schedule / --paused",
+                "error: urls set needs at least one of --url / --version / --schedule / "
+                "--paused / --notify-emails / --notify-when",
                 file=sys.stderr,
             )
             return 2
@@ -2351,6 +2378,19 @@ def build_parser() -> argparse.ArgumentParser:
         "--schedule", choices=["off", "6h", "12h", "24h", "weekly"], default=None
     )
     p_urls.add_argument("--paused", action="store_true", help="pause scheduled scans (set)")
+    # TODO 2.56 — powiadomienia per URL (e-mail/Slack).
+    p_urls.add_argument(
+        "--notify-emails", dest="notify_emails",
+        help="comma-separated e-mail recipients for this URL (add/set)",
+    )
+    p_urls.add_argument(
+        "--notify-when", dest="notify_when", choices=["all", "error", "off"], default=None,
+        help="send alerts: all = every scan, error = only on findings, off = paused (add/set)",
+    )
+    p_urls.add_argument(
+        "--notify-slack", dest="notify_slack",
+        help="comma-separated Slack connector ids for this URL (add/set)",
+    )
     _json_flag(p_urls)
     p_urls.set_defaults(func=_cmd_urls)
 
@@ -2391,6 +2431,30 @@ def build_parser() -> argparse.ArgumentParser:
     p_config = sub.add_parser("config", help="show / manage saved config (API key)")
     p_config.add_argument("--clear", action="store_true", help="remove the saved config file")
     p_config.set_defaults(func=_cmd_config)
+
+    # TODO 2.58 — login jak w aws/gcloud: device flow w przeglądarce + zapis tokenu.
+    p_login = sub.add_parser(
+        "login", help="log in via browser (device flow) and save the token locally"
+    )
+    p_login.add_argument(
+        "--no-browser",
+        action="store_true",
+        help="don't open the browser — just print the URL (SSH / headless)",
+    )
+    p_login.add_argument(
+        "--token",
+        help="headless alternative: validate and save an existing las_dev_... key",
+    )
+    _json_flag(p_login)
+    p_login.set_defaults(func=_cmd_login)
+
+    p_logout = sub.add_parser("logout", help="remove the saved login token")
+    _json_flag(p_logout)
+    p_logout.set_defaults(func=_cmd_logout)
+
+    p_whoami = sub.add_parser("whoami", help="show the org, key prefix, scopes and expiry")
+    _json_flag(p_whoami)
+    p_whoami.set_defaults(func=_cmd_whoami)
 
     p_connect = sub.add_parser(
         "connect", help="reverse tunnel — act as a proxy for scans against localhost/internal"
@@ -2439,7 +2503,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def _needs_key(args: argparse.Namespace) -> bool:
-    if args.command == "config":
+    if args.command in ("config", "login", "logout"):
         return False
     return not (args.command in ("scan-code", "push-code") and getattr(args, "dry_run", False))
 
@@ -2542,6 +2606,139 @@ def _prompt_for_key() -> str:
     return value
 
 
+def _save_login_token(api_url: str, token: str, who: dict[str, Any]) -> None:
+    """Zapisuje token + metadane loginu do configu (0600)."""
+    save_config({"api_url": api_url or ""})  # zachowaj wybrany API URL
+    save_login(
+        {
+            "api_key": token,
+            "org_id": str(who.get("organisation_id", "") or ""),
+            "key_prefix": str(who.get("prefix", "") or ""),
+            "expires_at": str(who.get("expires_at", "") or ""),
+            "authorized_at": datetime.now(timezone.utc).isoformat(),
+            "scopes": ",".join(who.get("scopes") or []),
+        }
+    )
+
+
+def _print_login_success(who: dict[str, Any]) -> None:
+    org = who.get("organisation_name") or who.get("organisation_id") or "(unknown org)"
+    expires = (who.get("expires_at") or "")[:10]
+    scopes = ", ".join(who.get("scopes") or []) or "full access"
+    print()
+    print(f"{_OK} Logged in — {_bold(str(org))}")
+    print(f"  key:     {who.get('prefix', '')}…")
+    print(f"  scopes:  {scopes}")
+    if expires:
+        print(f"  expires: {expires}")
+    print(f"{_OK} Token saved to {config_path()}")
+
+
+def _cmd_login(client: LiveAPISec, args: argparse.Namespace) -> int:
+    """`liveapisec login` — device flow w przeglądarce lub `--token` (headless)."""
+    # 1) Headless: wklejony istniejący klucz z panelu (zachowana stara metoda).
+    if getattr(args, "token", None):
+        probe = LiveAPISec(api_url=client.api_url, api_key=args.token)
+        try:
+            who = probe.whoami()
+        except LiveAPISecError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 2
+        _save_login_token(client.api_url, args.token, who)
+        if args.json:
+            print(LiveAPISec.dump({**who, "api_key": args.token}))
+        else:
+            _print_login_success(who)
+        return 0
+
+    # 2) CI / brak terminala: login wymaga przeglądarki — w CI użyj sekretu.
+    if os.environ.get("CI") or not sys.stdin.isatty():
+        print(
+            "error: `login` needs a browser and an interactive terminal.\n"
+            "hint: in CI/CD set the LIVEAPISEC_API_KEY secret instead "
+            "(Settings → Developer API).",
+            file=sys.stderr,
+        )
+        return 2
+
+    client_name = platform.node() or "unknown"
+    client_os = f"{platform.system()} {platform.release()}".strip()
+    try:
+        dev = client.start_device_login(client_name, client_os)
+    except LiveAPISecError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+
+    url = dev.get("verification_uri_complete") or dev.get("verification_uri")
+    print()
+    print(f"  First, copy your one-time code:  {_bold(dev['user_code'])}")
+    print(f"  Then open:  {url}")
+    if not getattr(args, "no_browser", False):
+        with contextlib.suppress(Exception):  # brak przeglądarki → zostaje sam URL
+            if webbrowser.open(url):
+                print(_dim("  (opened in your browser)"))
+    print()
+    print(_dim("Waiting for approval…  (Ctrl+C to cancel)"))
+
+    interval = float(dev.get("interval") or 5)
+    deadline = time.monotonic() + float(dev.get("expires_in") or 600)
+    try:
+        while time.monotonic() < deadline:
+            try:
+                tok = client.poll_device_token(dev["device_code"])
+            except LiveAPISecError as exc:
+                if (exc.title or "").lower() == "authorization_pending":
+                    time.sleep(interval)
+                    continue
+                print(f"\nerror: {exc}", file=sys.stderr)
+                return 2
+            _save_login_token(client.api_url, tok["api_key"], tok)
+            if args.json:
+                print(LiveAPISec.dump(tok))
+            else:
+                try:
+                    who = LiveAPISec(api_url=client.api_url, api_key=tok["api_key"]).whoami()
+                except LiveAPISecError:  # metadane z tokenu wystarczą
+                    who = tok
+                _print_login_success(who)
+            return 0
+    except KeyboardInterrupt:
+        print("\ncancelled", file=sys.stderr)
+        return 1
+    print("\nerror: login timed out — run `liveapisec login` again", file=sys.stderr)
+    return 2
+
+
+def _cmd_logout(client: LiveAPISec, args: argparse.Namespace) -> int:
+    """`liveapisec logout` — usuwa zapisany token (klucz w panelu zostaje)."""
+    path = clear_login()
+    if args.json:
+        print(LiveAPISec.dump({"logged_out": True, "config": path}))
+    else:
+        print(f"{_OK} Logged out — removed the saved token from {path}")
+    return 0
+
+
+def _cmd_whoami(client: LiveAPISec, args: argparse.Namespace) -> int:
+    """`liveapisec whoami` — organizacja, prefix klucza, scopes, wygaśnięcie."""
+    try:
+        who = client.whoami()
+    except LiveAPISecError as exc:
+        _print_error(exc)
+        return 2
+    if args.json:
+        print(LiveAPISec.dump(who))
+        return 0
+    org = who.get("organisation_name") or who.get("organisation_id") or "(unknown)"
+    print(f"org:       {org}")
+    print(f"key:       {who.get('prefix', '')}…")
+    print(f"scopes:    {', '.join(who.get('scopes') or []) or 'full access'}")
+    print(f"expires:   {who.get('expires_at') or 'never'}")
+    if who.get("last_used_at"):
+        print(f"last used: {who['last_used_at']}")
+    return 0
+
+
 def _cmd_config(client: LiveAPISec, args: argparse.Namespace) -> int:
     path = config_path()
     cfg = load_config()
@@ -2552,6 +2749,15 @@ def _cmd_config(client: LiveAPISec, args: argparse.Namespace) -> int:
     print(f"config: {path}")
     print(f"api_key: {'set' if cfg.get('api_key') else 'not set'}")
     print(f"api_url: {cfg.get('api_url') or '(default ' + DEFAULT_API_URL + ')'}")
+    # TODO 2.58 — metadane loginu (jeśli używano `liveapisec login`).
+    if cfg.get("key_prefix"):
+        print(f"login key: {cfg['key_prefix']}…")
+    if cfg.get("org_id"):
+        print(f"org: {cfg['org_id']}")
+    if cfg.get("expires_at"):
+        print(f"expires: {cfg['expires_at'][:10]}")
+    if cfg.get("scopes"):
+        print(f"scopes: {cfg['scopes']}")
     print()
     print("Where to find your key:  Settings → Developer API → Create API key")
     print(f"  {DEFAULT_FRONTEND_URL}/settings")
