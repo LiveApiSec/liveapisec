@@ -411,11 +411,33 @@ def _fmt_scan(scan: dict[str, Any]) -> str:
     return " ".join(parts)
 
 
+def _finding_badges(f: dict[str, Any]) -> str:
+    """Badge'e intel (TODO 2.65 Fala 3: KEV + CVE) — puste gdy brak."""
+    bits: list[str] = []
+    if f.get("kev"):
+        bits.append("[KEV]")
+    cves = f.get("cve_ids") or []
+    if cves:
+        bits.append(str(cves[0]) + (f"+{len(cves) - 1}" if len(cves) > 1 else ""))
+    return " ".join(bits)
+
+
+def _finding_rank(f: dict[str, Any]) -> tuple:
+    """G8-parytet z panelem: najpierw risk_score, potem severity (TODO 2.65)."""
+    try:
+        risk = float(f.get("risk_score")) if f.get("risk_score") is not None else None
+    except (ValueError, TypeError):
+        risk = None
+    sev = str(f.get("severity", "info")).lower()
+    return (-risk if risk is not None else 0.0, _SEV.index(sev) if sev in _SEV else 99)
+
+
 def _fmt_finding(f: dict[str, Any]) -> str:
     sev = f.get("severity", "?")
     title = f.get("title") or f.get("category") or "?"
     target = f.get("target") or ""
-    line = f"[{_severe(sev)}] {title}"
+    badges = _finding_badges(f)
+    line = f"[{_severe(sev)}] {title}" + (f" {badges}" if badges else "")
     if target:
         line += _dim(f"  ({target})")
     return line
@@ -746,18 +768,19 @@ def _print_scan_summary(scan: dict[str, Any], findings: list[dict[str, Any]]) ->
     tested, absent = summary.get("tested"), summary.get("absent")
     bits = [f"risk={_md_risk(by_sev)}"]
     if tested is not None:
-        cov = f"coverage={tested} tested"
+        completed = scan.get("completed_targets")
+        cov = f"coverage={completed if completed is not None else tested} of {tested} tested"
         if absent:
             cov += f", {absent} not deployed"
         bits.append(cov)
+    if scan.get("budget_exhausted"):
+        untested = scan.get("untested_targets") or []
+        bits.append(f"budget exhausted ({len(untested)} untested)")
     print(_dim("  " + "  ·  ".join(bits)))
     if not findings:
         print(_green("  no findings — nothing to improve"))
         return
-    order = {s: i for i, s in enumerate(_SEV)}
-    ordered = sorted(
-        findings, key=lambda f: order.get(str(f.get("severity", "info")).lower(), 99)
-    )
+    ordered = sorted(findings, key=_finding_rank)
     print("  points to improve:")
     for f in ordered[:10]:
         sev = str(f.get("severity", "info")).upper()
@@ -1431,7 +1454,8 @@ def _finding_fix(finding: dict[str, Any]) -> str:
     """Fix recommendation for a finding (category map, fallback to description)."""
     cat = str(finding.get("category") or "").lower()
     return (
-        _REMEDIATION.get(cat)
+        str(finding.get("remediation") or "").strip()  # TODO 2.65 Faza 0: fix z serwera
+        or _REMEDIATION.get(cat)
         or str(finding.get("description") or "").strip()
         or "Review the finding and apply the appropriate control."
     )
@@ -1553,15 +1577,17 @@ def _md_report(
     if not findings:
         lines.append("No findings — clean scan. 🎉")
     else:
-        ordered = sorted(findings, key=lambda f: _SEV.index(str(f.get("severity", "info")).lower()) if str(f.get("severity", "info")).lower() in _SEV else 99)
+        ordered = sorted(findings, key=_finding_rank)
         lines += [
-            "| Severity | Title | Target | Category |",
-            "| --- | --- | --- | --- |",
+            "| Severity | Title | Target | Category | Intel |",
+            "| --- | --- | --- | --- | --- |",
         ]
         for f in ordered:
+            intel = _finding_badges(f).strip().replace("[", "").replace("]", "")
             lines.append(
                 f"| {_md_cell(f.get('severity'))} | {_md_cell(f.get('title'))} | "
-                f"`{_md_cell(f.get('target'))}` | {_md_cell(f.get('category'))} |"
+                f"`{_md_cell(f.get('target'))}` | {_md_cell(f.get('category'))} | "
+                f"{_md_cell(intel or '—')} |"
             )
     if compliance and not compliance.get("error"):
         lines += ["", "## Compliance mapping (illustrative, not a certification)", ""]

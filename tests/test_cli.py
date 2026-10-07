@@ -2011,3 +2011,48 @@ def test_llm_command_does_not_need_api_key() -> None:
     from liveapisec.cli import _needs_key
 
     assert _needs_key(_LlmArgs()) is False
+
+
+def test_finding_badges_kev_and_cve() -> None:
+    """TODO 2.65 Fala 3: CLI pokazuje KEV + CVE (parytet z panelem)."""
+    from liveapisec.cli import _finding_badges, _fmt_finding
+
+    assert _finding_badges({"severity": "low"}) == ""
+    assert _finding_badges({"kev": True, "cve_ids": ["CVE-2021-23017"]}) == "[KEV] CVE-2021-23017"
+    line = _fmt_finding({"severity": "high", "title": "t", "kev": True, "cve_ids": ["CVE-2020-11023", "CVE-2020-11022"]})
+    assert "[KEV]" in line and "CVE-2020-11023+1" in line
+
+
+def test_finding_rank_prefers_risk_score() -> None:
+    """G8 w CLI: gorący medium (risk 6.2) przed zimnym high (risk 5.9)."""
+    from liveapisec.cli import _finding_rank
+
+    hot = {"severity": "medium", "risk_score": 6.2}
+    cold = {"severity": "high", "risk_score": 5.9}
+    assert _finding_rank(hot) < _finding_rank(cold)
+    assert _finding_rank({"severity": "high"}) < _finding_rank({"severity": "low"})
+
+
+def test_finding_fix_prefers_server_remediation() -> None:
+    """Faza 0 w CLI: fix z serwera wygrywa ze statyczną mapą (30 nowych kategorii)."""
+    from liveapisec.cli import _finding_fix
+
+    assert _finding_fix({"category": "sms_guard", "remediation": "Block premium ranges"}) == "Block premium ranges"
+    assert "Review the finding" in _finding_fix({"category": "unknown_xyz"})
+
+
+def test_print_scan_summary_shows_budget_exhaustion(capsys) -> None:
+    """Budżet skanu: CLI pokazuje ukończone vs tail celów (uczciwe pokrycie)."""
+    from liveapisec.cli import _print_scan_summary
+
+    scan = {
+        "summary": {"tested": 25, "by_severity": {}},
+        "tested": 25,
+        "completed_targets": 20,
+        "budget_exhausted": True,
+        "untested_targets": ["GET /a", "GET /b", "GET /c", "GET /d", "GET /e"],
+    }
+    _print_scan_summary(scan, [])
+    out = capsys.readouterr().out
+    assert "coverage=20 of 25 tested" in out
+    assert "budget exhausted (5 untested)" in out
