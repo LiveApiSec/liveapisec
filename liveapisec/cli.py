@@ -1725,7 +1725,8 @@ def _cmd_ask_show(client: LiveAPISec, args: argparse.Namespace) -> int:
         if q.get("kind") == "clarification":
             continue  # already shown above
         ans = q.get("answer") or {}
-        verdict = ans.get("verdict", "unanswered")
+        # Notatka bez verdictu (doprecyzowanie, run z --note) tez znaczy: odpowiedziane.
+        verdict = ans.get("verdict") or ("noted" if ans.get("note") else "unanswered")
         if only == "failed" and verdict != "fail":
             continue
         if only == "unanswered" and verdict != "unanswered":

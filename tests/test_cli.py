@@ -2114,3 +2114,44 @@ def test_cli_error_text_strips_html(capsys) -> None:
     clean = _clean_error_text(html)
     assert "<" not in clean and "504 Gateway Timeout" in clean
     assert _clean_error_text("plain boom") == "plain boom"
+
+
+def test_cli_ask_show_only_unanswered_hides_noted(capsys) -> None:
+    """Bug 1b: notatka bez verdictu tez znaczy 'odpowiedziane' (main loop)."""
+    from liveapisec.cli import _cmd_ask_show
+
+    class Args:
+        session = "s1"; only = "unanswered"; json = False
+
+    class Client:
+        def get_ask_session(self, session):
+            return {"counts": {}, "questions": [
+                {"qid": "SEC-ASK-1", "kind": "audit", "category": "auth",
+                 "question": "Q?", "fix": "", "answer": {"note": "notka"}},
+                {"qid": "SEC-ASK-2", "kind": "audit", "category": "auth",
+                 "question": "Q?", "fix": "", "answer": {"verdict": "pass"}},
+            ]}
+
+    assert _cmd_ask_show(Client(), Args()) == 0
+    out = capsys.readouterr().out
+    assert "SEC-ASK-1" not in out and "SEC-ASK-2" not in out
+
+
+def test_cli_answer_retries_on_429() -> None:
+    """Bug 4: 429 na answer -> backoff z Retry-After, nie goły błąd."""
+    from liveapisec.client import LiveAPISec, LiveAPISecError
+
+    calls: list = []
+
+    class C(LiveAPISec):
+        def __init__(self):
+            pass
+
+        def _request(self, method, path, timeout=None, **kw):
+            calls.append(kw)
+            if len(calls) == 1:
+                raise LiveAPISecError(429, "Slow down", "busy", retry_after=0.01)
+            return {"ok": True}
+
+    assert C().answer_ask_question("s", "SEC-ASK-1", "pass") == {"ok": True}
+    assert len(calls) == 2

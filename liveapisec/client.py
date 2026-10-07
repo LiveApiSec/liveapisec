@@ -486,12 +486,27 @@ class LiveAPISec:
     def answer_ask_question(
         self, session_id: str, qid: str, verdict: str, note: str = ""
     ) -> dict[str, Any]:
-        """Answer one question: verdict = pass | fail | na (+ developer note)."""
-        return self._request(
-            "POST",
-            f"/developers/ask-sessions/{session_id}/answers",
-            json={"qid": qid, "verdict": verdict, "note": note},
-        )
+        """Answer one question: verdict = pass | fail | na (+ developer note).
+
+        Honors 429 with backoff (server sends Retry-After): fast `ask run`
+        series must not lose answers to a transient limit.
+        """
+        import time as _time
+
+        last: LiveAPISecError | None = None
+        for attempt in range(4):
+            try:
+                return self._request(
+                    "POST",
+                    f"/developers/ask-sessions/{session_id}/answers",
+                    json={"qid": qid, "verdict": verdict, "note": note},
+                )
+            except LiveAPISecError as exc:
+                if exc.status != 429 or attempt == 3:
+                    raise
+                last = exc
+                _time.sleep(exc.retry_after or (2**attempt))
+        raise last  # pragma: no cover - loop always returns/raises above
 
     def ask_followups(
         self, session_id: str, rounds: int = 1, until_dry: bool = False
