@@ -48,7 +48,7 @@ class LiveAPISecError(RuntimeError):
         self.status = status
         self.title = title
         self.detail = detail
-        self.retry_after = retry_after  # z nagłówka Retry-After (429) — do backoffu
+        self.retry_after = retry_after  # from the Retry-After header (429) — for backoff
 
 
 class ScanStatus:
@@ -405,6 +405,10 @@ class LiveAPISec:
             "GET", f"/developers/projects/{project_id}/scans/{scan_id}/compliance"
         )
 
+    def get_threat_brief(self, limit: int = 10) -> dict[str, Any]:
+        """Threat-brief: latest KEV from cache + guidance (TODO 2.65 R4)."""
+        return self._request("GET", f"/threat-brief?limit={limit}")
+
     def get_report(self, project_id: str, scan_id: str) -> dict[str, Any]:
         """Full saved scan report (raw results + summary)."""
         return self._request(
@@ -513,7 +517,7 @@ class LiveAPISec:
 
     @staticmethod
     def findings_above(findings: list[dict[str, Any]], min_severity: str) -> list[dict[str, Any]]:
-        """Findings o severity >= min_severity (wg ranku: critical < high < ...)."""
+        """Findings with severity >= min_severity (by rank: critical < high < ...)."""
         threshold = severity_rank(min_severity)
         return [f for f in findings if severity_rank(f.get("severity", "info")) <= threshold]
 

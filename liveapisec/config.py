@@ -57,8 +57,8 @@ def clear_config() -> str:
 
 
 # --- login (TODO 2.58) -------------------------------------------------------
-# Klucze zapisywane przez `liveapisec login` (device flow). Trzymamy metadane,
-# żeby `config`/`whoami` mogły pokazać organizację i datę wygaśnięcia.
+# Keys saved by `liveapisec login` (device flow). We keep metadata,
+# so `config`/`whoami` can show the organisation and expiry date.
 LOGIN_KEYS = (
     "api_key",
     "org_id",
@@ -70,12 +70,12 @@ LOGIN_KEYS = (
 
 
 def save_login(values: dict[str, str]) -> str:
-    """Zapisuje token + metadane loginu (nie nadpisuje api_url, jeśli pusty)."""
+    """Saves the token + login metadata (never overwrites api_url when empty)."""
     return save_config({k: v for k, v in values.items() if k in LOGIN_KEYS and v})
 
 
 def clear_login() -> str:
-    """Usuwa token i metadane loginu, zachowuje `api_url`."""
+    """Removes the token and login metadata, keeps `api_url`."""
     path = config_path()
     data = load_config()
     for key in LOGIN_KEYS:

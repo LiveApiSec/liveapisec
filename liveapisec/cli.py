@@ -184,10 +184,10 @@ def _fill_project_defaults(
     name: str | None,
     base_url: str | None,
 ) -> tuple[str | None, str | None]:
-    """Dopełnij brakujący `--name`/`--base-url` z istniejącego projektu.
+    """Backfill a missing `--name`/`--base-url` from the existing project.
 
-    `push --project <id>` wysyła PUT, który wymaga pełnego payloadu — bez tego
-    brak `name` dawał mylący „Validation Error” (422) zamiast aktualizacji.
+    `push --project <id>` sends a PUT, which requires the full payload — without it,
+    a missing `name` produced a misleading "Validation Error" (422) instead of updating.
     """
     if not project_id or (name and base_url):
         return name, base_url
@@ -221,7 +221,7 @@ def _auth_args(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument("--auth-client-id", help="OAuth2 client_id for type=oauth2")
     parser.add_argument("--auth-client-secret", help="OAuth2 client_secret for type=oauth2")
-    # TODO 2.50: login username/password → token (krótkotrwałe JWT).
+    # TODO 2.50: login username/password → token (short-lived JWT).
     parser.add_argument("--auth-login-url", help="login endpoint for type=login")
     parser.add_argument("--auth-username", help="username/email for type=login")
     parser.add_argument("--auth-password", help="password for type=login")
@@ -237,7 +237,7 @@ def _auth_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--auth-body", choices=["json", "form"], default=None, help="login body format (default json)"
     )
-    # TODO 2.50: Clerk (test-instancja) — świeży session-JWT per skan.
+    # TODO 2.50: Clerk (test instance) — a fresh session-JWT per scan.
     parser.add_argument("--auth-clerk-secret", help="Clerk Backend API secret (sk_test_...) for type=clerk")
     parser.add_argument("--auth-clerk-user", help="Clerk user_id (user_...) for type=clerk")
     parser.add_argument("--auth-clerk-org", help="optional Clerk org_id (active_organization_id) for type=clerk")
@@ -399,7 +399,7 @@ def _fmt_scan(scan: dict[str, Any]) -> str:
                 by_sev.items(), key=lambda kv: _SEV.index(kv[0]) if kv[0] in _SEV else 9
             )
         )
-        # TODO 2.50: hacker mode nie ma `tests_run` — pokaż requests/steps/risk.
+        # TODO 2.50: hacker mode has no `tests_run` — show requests/steps/risk.
         if scan.get("mode") == "hacker":
             parts.append(f"requests={summary.get('requests', '?')}")
             parts.append(f"steps={summary.get('steps', '?')}")
@@ -412,7 +412,7 @@ def _fmt_scan(scan: dict[str, Any]) -> str:
 
 
 def _finding_badges(f: dict[str, Any]) -> str:
-    """Badge'e intel (TODO 2.65 Fala 3: KEV + CVE) — puste gdy brak."""
+    """Intel badges (TODO 2.65 Wave 3: KEV + CVE) — empty when absent."""
     bits: list[str] = []
     if f.get("kev"):
         bits.append("[KEV]")
@@ -423,7 +423,7 @@ def _finding_badges(f: dict[str, Any]) -> str:
 
 
 def _finding_rank(f: dict[str, Any]) -> tuple:
-    """G8-parytet z panelem: najpierw risk_score, potem severity (TODO 2.65)."""
+    """G8 parity with the dashboard: risk_score first, then severity (TODO 2.65)."""
     try:
         risk = float(f.get("risk_score")) if f.get("risk_score") is not None else None
     except (ValueError, TypeError):
@@ -444,10 +444,10 @@ def _fmt_finding(f: dict[str, Any]) -> str:
 
 
 def _load_spec_file(path: str) -> dict:
-    """Wczytaj lokalny OpenAPI (JSON/YAML) jako PEŁNY dict (TODO 2.50).
+    """Load a local OpenAPI (JSON/YAML) as the FULL dict (TODO 2.50).
 
     Zachowuje parametry, requestBody, schematy i security. Serwer nic nie
-    pobiera (brak SSRF) — wysyłamy cały spec w polu `spec`.
+    fetches (no SSRF) — we send the whole spec in the `spec` field.
     """
     import json
 
@@ -476,10 +476,10 @@ def _load_spec_file(path: str) -> dict:
 
 
 def _endpoints_from_spec_file(path: str) -> list[dict[str, str]]:
-    """Parsuj lokalny OpenAPI (JSON/YAML) na listę {method, path}.
+    """Parse a local OpenAPI (JSON/YAML) into a {method, path} list.
 
-    (Kompatybilność — `push` wysyła teraz cały spec; to zostaje dla narzędzi,
-    które potrzebują tylko listy endpointów.)
+    (Compatibility — `push` now sends the whole spec; this stays for tools
+    that only need the endpoint list.)
     """
     spec = _load_spec_file(path)
     methods = ("GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS")
@@ -759,9 +759,9 @@ def _auth_b_args(parser: argparse.ArgumentParser) -> None:
 
 
 def _print_scan_summary(scan: dict[str, Any], findings: list[dict[str, Any]]) -> None:
-    """Krótkie podsumowanie po skanie (TODO 2.50): ryzyko, pokrycie, punkty do poprawy.
+    """Short post-scan summary (TODO 2.50): risk, coverage, fix points.
 
-    Drukowane na końcu `scan --wait` (obok pełnego raportu z `report`/`all`).
+    Printed at the end of `scan --wait` (next to the full `report`/`all` report).
     """
     summary = scan.get("summary") or {}
     by_sev = summary.get("by_severity") or {}
@@ -824,7 +824,7 @@ def _cmd_scan(client: LiveAPISec, args: argparse.Namespace) -> int:
         print(LiveAPISec.dump(done))
     else:
         print(_fmt_scan(done))
-        # TODO 2.50: automatyczne, krótkie podsumowanie po zakończonym skanie.
+        # TODO 2.50: automatic short summary after a finished scan.
         if done.get("status") == "completed":
             _print_scan_summary(done, findings)
 
@@ -850,7 +850,7 @@ def _cmd_scan(client: LiveAPISec, args: argparse.Namespace) -> int:
     return 0
 
 
-# Nagłówki hop-by-hop — nie przekazujemy ich do lokalnego requestu.
+# Hop-by-hop headers — never forwarded to the local request.
 _HOP_HEADERS = {
     "host",
     "content-length",
@@ -866,11 +866,11 @@ _HOP_HEADERS = {
 
 
 def _cmd_llm(client: LiveAPISec, args: argparse.Namespace) -> int:
-    """Instrukcje dla asystentów AI (llms.txt) albo pełna dokumentacja
+    """Instructions for AI assistants (llms.txt) or full documentation
     (llms-full.txt) — to samo, co na https://liveapisec.com/docs.
 
-    Publiczne (bez klucza API). `--project` dokleja kontekst projektu, żeby
-    asystent od razu wiedział, o który projekt chodzi.
+    Public (no API key). `--project` appends the project context so the
+    assistant immediately knows which project is meant.
     """
     text = client.get_llm_instructions(
         full=bool(getattr(args, "full", False)),
@@ -911,15 +911,15 @@ def _cmd_llm(client: LiveAPISec, args: argparse.Namespace) -> int:
 
 
 def _scan_wait_timeout(args: argparse.Namespace) -> float:
-    """Okno `--wait`. Tunel: dłużej (heartbeat + wolne requesty lokalne), 1h."""
+    """The `--wait` window. Tunnel: longer (heartbeat + slow local requests), 1h."""
     return 3600.0 if getattr(args, "tunnel", False) else 600.0
 
 
 def _cmd_connect(client: LiveAPISec, args: argparse.Namespace) -> int:
-    """Reverse tunnel: CLI wykonuje requesty skanu lokalnie (localhost/wewnętrzne).
+    """Reverse tunnel: the CLI executes scan requests locally (localhost/internal).
 
-    Rejestruje tunel dla projektu i długo-polluje po requesty; każdy wykonuje
-    lokalnie (tylko host z base_url) i odsyła wynik. Ctrl+C zamyka tunel.
+    Registers a tunnel for the project and long-polls for requests; each one runs
+    locally (only the base_url host) and sends back the result. Ctrl+C closes the tunnel.
     W innym terminalu: `liveapisec scan --project <id> --tunnel`.
     """
     import base64
@@ -946,9 +946,9 @@ def _cmd_connect(client: LiveAPISec, args: argparse.Namespace) -> int:
                 try:
                     req = client.tunnel_next(tunnel_id, timeout=poll)
                 except LiveAPISecError as exc:
-                    # 401/403 = zły klucz/scope → ponawianie bez sensu. Reszta
-                    # (429/5xx/sieć/CF challenge) = przejściowe → backoff, NIE
-                    # zamykamy tunelu (inaczej jeden 429 osieroca trwający skan).
+                    # 401/403 = bad key/scope → retrying is pointless. The rest
+                    # (429/5xx/network/CF challenge) = transient → backoff, do NOT
+                    # close the tunnel (otherwise a single 429 orphans a running scan).
                     if exc.status in (401, 403):
                         raise
                     delay = exc.retry_after or backoff
@@ -986,22 +986,22 @@ def _cmd_connect(client: LiveAPISec, args: argparse.Namespace) -> int:
                         "headers": dict(resp.headers),
                         "body": base64.b64encode(resp.content).decode("ascii"),
                     }
-                except Exception as exc:  # noqa: BLE001 — błąd po stronie CLI
+                except Exception as exc:  # noqa: BLE001 — CLI-side error
                     result = {"request_id": rid, "error": str(exc)}
                 client.tunnel_result(tunnel_id, result)
-    except KeyboardInterrupt:  # Ctrl+C to oczekiwany sposób zamknięcia tunelu
+    except KeyboardInterrupt:  # Ctrl+C is the expected way to close the tunnel
         pass
     finally:
         try:
             client.close_tunnel(tunnel_id)
-        except Exception:  # noqa: BLE001, S110 — sprzątanie nie rwie wyjścia
+        except Exception:  # noqa: BLE001, S110 — cleanup never breaks the exit
             pass
         print("\ntunnel closed", file=sys.stderr)
     return 0
 
 
 def _print_hacker_summary(scan: dict[str, Any]) -> None:
-    """Krótkie podsumowanie hacker-mode (TODO 2.50): risk, plan, proces, rekomendacje."""
+    """Short hacker-mode summary (TODO 2.50): risk, plan, process, recommendations."""
     sm = scan.get("summary") or {}
     risk = str(sm.get("risk_level") or "?").upper()
     print(
@@ -1078,7 +1078,7 @@ def _cmd_hacker(client: LiveAPISec, args: argparse.Namespace) -> int:
         print(LiveAPISec.dump(done))
     else:
         print(_fmt_scan(done))
-        # TODO 2.50: auto-podsumowanie hacker-mode (plan/risk/rekomendacje).
+        # TODO 2.50: hacker-mode auto-summary (plan/risk/recommendations).
         if done.get("status") == "completed":
             _print_hacker_summary(done)
     return 0 if done.get("status") == "completed" else 2
@@ -1097,7 +1097,7 @@ def _cmd_status(client: LiveAPISec, args: argparse.Namespace) -> int:
         f"project {project['project_id']}: {project.get('name')} — {project.get('endpoints_count')} endpoints"
     )
     if project.get("slug"):
-        # TODO 2.61: slug = zamiennik id w `--project` (i segment /trust/<slug>).
+        # TODO 2.61: slug = id replacement in `--project` (and the /trust/<slug> segment).
         print(f"  slug: {project['slug']}")
     if project.get("base_url"):
         print(f"  base_url: {project['base_url']}")
@@ -1170,6 +1170,21 @@ def _cmd_verdict(client: LiveAPISec, args: argparse.Namespace) -> int:
     return 0 if v.get("verdict") == "pass" else 1
 
 
+def _cmd_brief(client: LiveAPISec, args: argparse.Namespace) -> int:
+    """Threat-brief: latest KEV + 'does it affect your API' checks (TODO 2.65 R4)."""
+    data = client.get_threat_brief(limit=args.limit)
+    if args.json:
+        print(LiveAPISec.dump(data))
+        return 0
+    items = data.get("items") or []
+    print(f"threat brief: {data.get('count', len(items))} KEV in cache (showing {len(items)})")
+    for it in items:
+        print(f"  {it.get('cve')} — {it.get('vendor')} / {it.get('product')} (added {it.get('added')})")
+        print(_dim(f"    {it.get('check')}"))
+    print(_dim(str(data.get("guidance", ""))))
+    return 0
+
+
 def _cmd_compliance(client: LiveAPISec, args: argparse.Namespace) -> int:
     """Compliance mapping (PCI DSS / SOC 2 / ISO 27001 / GDPR / NIS2, SaaS+)."""
     if not args.project or not args.scan:
@@ -1234,7 +1249,7 @@ def _auto_baseline(client: LiveAPISec, project_id: str, scan_id: str) -> dict[st
     """Previous completed scan of the project (newest first) — default baseline."""
     try:
         scans = client.list_scans(project_id)
-    except Exception:  # noqa: BLE001 — brak historii to nie błąd, verdict skip
+    except Exception:  # noqa: BLE001 — no history is not an error, verdict skip
         return None
     for s in scans:
         if s.get("scan_id") != scan_id and s.get("status") == "completed":
@@ -1255,7 +1270,7 @@ def _cmd_all(client: LiveAPISec, args: argparse.Namespace) -> int:
         print("error: --hacker needs --env (e.g. development)", file=sys.stderr)
         return 2
 
-    # 1. scan (+ wait — `all` zawsze czeka na wynik)
+    # 1. scan (+ wait — `all` always waits for the result)
     if hacker:
         print(
             _WARN
@@ -1284,7 +1299,7 @@ def _cmd_all(client: LiveAPISec, args: argparse.Namespace) -> int:
 
     out: dict[str, Any] = {"scan": done}
 
-    # 2. verdict (jawny --baseline albo auto = poprzedni ukończony skan)
+    # 2. verdict (explicit --baseline or auto = previous completed scan)
     baseline_id = args.baseline
     if not baseline_id:
         prev = _auto_baseline(client, args.project, scan_id)
@@ -1306,7 +1321,7 @@ def _cmd_all(client: LiveAPISec, args: argparse.Namespace) -> int:
     elif not args.json:
         print(_dim("no earlier completed scan — verdict skipped (first scan)"))
 
-    # 3. compliance (Pro+; poniżej planu → notka, nie błąd)
+    # 3. compliance (Pro+; below plan → note, not an error)
     try:
         out["compliance"] = client.get_compliance(args.project, scan_id)
     except LiveAPISecError as exc:
@@ -1314,7 +1329,7 @@ def _cmd_all(client: LiveAPISec, args: argparse.Namespace) -> int:
         if not args.json:
             print(_dim(f"compliance skipped: {exc.title}"))
 
-    # 4. report → plik (JSON albo Markdown z verdict + compliance w środku)
+    # 4. report → file (JSON or Markdown with verdict + compliance inside)
     report = client.get_report(args.project, scan_id)
     out["report"] = {"scan_id": scan_id}
     fmt = (getattr(args, "format", None) or "json").lower()
@@ -1340,7 +1355,7 @@ def _cmd_all(client: LiveAPISec, args: argparse.Namespace) -> int:
             fh.write(LiveAPISec.dump(report))
     if not args.json:
         print(f"report saved: {report_path} (format={fmt})")
-    # Ask-mode w podsumowaniu (informacyjnie — gate'em jest verdict).
+    # Ask-mode in the summary (informational — the verdict is the gate).
     ask_sum = _latest_ask_with_answers(client, args.project)
     out["ask"] = (
         {"session_id": ask_sum.get("session_id"), "counts": ask_sum.get("counts")}
@@ -1353,7 +1368,7 @@ def _cmd_all(client: LiveAPISec, args: argparse.Namespace) -> int:
         mark = _red(f"fail={fails}") if fails else _green("no failed answers")
         print(f"ask-mode: {mark}  (pass={counts.get('pass', 0)} unanswered={counts.get('unanswered', 0)})")
 
-    # 5. PDF certyfikatu (tylko gdy passed — inaczej 409 → notka)
+    # 5. certificate PDF (only when passed — otherwise 409 → note)
     variant = args.variant or "full"
     try:
         content, filename = client.download_certificate_pdf(args.project, scan_id, variant)
@@ -1537,7 +1552,7 @@ def _md_report(
     ]
     if scan.get("branch") or scan.get("commit"):
         lines.append(f"- Code: branch `{scan.get('branch')}` commit `{scan.get('commit')}`")
-    # TODO 2.50: pokrycie (tested/absent) + podsumowanie ryzyka.
+    # TODO 2.50: coverage (tested/absent) + risk summary.
     tested = summary.get("tested")
     absent = summary.get("absent")
     if tested is not None:
@@ -1616,7 +1631,7 @@ _SEV_ORDER = ("critical", "high", "medium", "low")
 
 
 def _sev_label(sev: str) -> str:
-    """Kolorowa etykieta priorytetu (critical/high/medium/low)."""
+    """Coloured priority label (critical/high/medium/low)."""
     sev = (sev or "medium").lower()
     text = f"[{sev.upper()}]"
     if sev == "critical":
@@ -1631,7 +1646,7 @@ def _sev_label(sev: str) -> str:
 def _ask_counts_line(summary: dict[str, Any]) -> str:
     counts = summary.get("counts") or {}
     total = summary.get("questions", 0)
-    if isinstance(total, list):  # endpoint szczegółów zwraca listę pytań
+    if isinstance(total, list):  # detail endpoint returns the question list
         total = len(total)
     line = (
         f"session {summary.get('session_id', '')[:8]}…: {total} questions — "
@@ -1706,7 +1721,7 @@ def _cmd_ask_show(client: LiveAPISec, args: argparse.Namespace) -> int:
                 print(f"  Answer: {ans['note']}")
     for q in data.get("questions") or []:
         if q.get("kind") == "clarification":
-            continue  # już pokazane wyżej
+            continue  # already shown above
         ans = q.get("answer") or {}
         verdict = ans.get("verdict", "unanswered")
         if only == "failed" and verdict != "fail":
@@ -1787,8 +1802,8 @@ def _cmd_ask_run(client: LiveAPISec, args: argparse.Namespace) -> int:
 
 
 def _cmd_certificate(client: LiveAPISec, args: argparse.Namespace) -> int:
-    """Certyfikat / Trust Page w wybranym zakresie: publiczny URL + snippet."""
-    # TODO 2.50 (opcja 3): wybór URL-a, którego dotyczy PUBLICZNY certyfikat.
+    """Certificate / Trust Page in the chosen scope: public URL + snippet."""
+    # TODO 2.50 (option 3): pick the URL the PUBLIC certificate applies to.
     cert_url = getattr(args, "url", None)
     if cert_url is not None and not args.project:
         print("error: --url needs --project", file=sys.stderr)
@@ -1802,11 +1817,11 @@ def _cmd_certificate(client: LiveAPISec, args: argparse.Namespace) -> int:
                     f"{cert_url or 'default base_url'}"
                 )
             )
-        except Exception as exc:  # noqa: BLE001 — zły URL/uprawnienia
+        except Exception as exc:  # noqa: BLE001 — bad URL/permissions
             print(f"error: {exc}", file=sys.stderr)
             return 1
     if getattr(args, "pdf", False):
-        # PDF z konkretnego skanu (tylko gdy passed) — zapis do pliku.
+        # PDF from a specific scan (only when passed) — save to file.
         if not args.project or not args.scan:
             print("error: --pdf needs --project and --scan", file=sys.stderr)
             return 2
@@ -1860,7 +1875,7 @@ def _cmd_projects(client: LiveAPISec, args: argparse.Namespace) -> int:
     def _last_line(s: dict[str, Any]) -> str:
         name = s.get("name") or "?"
         slug = s.get("slug")
-        # TODO 2.61: pokaż slug — można go używać zamiennie z id w `--project`.
+        # TODO 2.61: show slug — usable interchangeably with id in `--project`.
         label = f"{name} ({slug})" if slug else name
         url = s.get("base_url") or ""
         last = s.get("last_scan")
@@ -1907,7 +1922,7 @@ def _cmd_project(client: LiveAPISec, args: argparse.Namespace) -> int:
         f"  access: {project.get('access') or 'external'}  "
         f"schedule: {project.get('schedule') or 'off'}"
     )
-    # TODO 2.50: URL-e — ten sam zestaw endpointów testowany przeciw każdemu.
+    # TODO 2.50: URLs — the same endpoint set tested against each one.
     envs = project.get("environments") or []
     if envs:
         print("  urls (same endpoints tested against each):")
@@ -1923,7 +1938,7 @@ def _cmd_project(client: LiveAPISec, args: argparse.Namespace) -> int:
             suffix = f"  [{', '.join(flags)}]" if flags else ""
             print(f"    - {e.get('name')}: {e.get('base_url')}{suffix}")
         print(f"    run one: liveapisec scan --project {args.project} --url <name>")
-    # TODO 2.50: profil auth wykryty ze skanu (schemes + grupy wymagające auth).
+    # TODO 2.50: auth profile detected from the scan (schemes + auth-requiring groups).
     ap = project.get("auth_profile") or {}
     if ap:
         schemes = ap.get("schemes") or []
@@ -1950,9 +1965,9 @@ def _cmd_project(client: LiveAPISec, args: argparse.Namespace) -> int:
 
 
 def _cmd_urls(client: LiveAPISec, args: argparse.Namespace) -> int:
-    """Zarządzanie URL-ami projektu (TODO 2.50): list / add / set / rm.
+    """Project URL management (TODO 2.50): list / add / set / rm.
 
-    Jeden zestaw endpointów, wiele adresów. Każdy URL ma własną wersję spec
+    One endpoint set, many addresses. Each URL has its own spec version
     (`latest` albo snapshot), harmonogram i stan `paused`.
     """
     if not args.project:
@@ -1976,7 +1991,7 @@ def _cmd_urls(client: LiveAPISec, args: argparse.Namespace) -> int:
                 flags.append(f"schedule={e['schedule']}")
             if e.get("paused"):
                 flags.append("paused")
-            # TODO 2.56 — powiadomienia per URL.
+            # TODO 2.56 — per-URL notifications.
             emails = e.get("notify_emails") or []
             when = e.get("notify_when") or "error"
             if when == "off":
@@ -1986,7 +2001,7 @@ def _cmd_urls(client: LiveAPISec, args: argparse.Namespace) -> int:
             print(f"  - {e.get('name')}: {e.get('base_url')}  [{', '.join(flags)}]")
         return 0
 
-    # TODO 2.56 — parsowanie flag powiadomień (comma separated).
+    # TODO 2.56 — notification flag parsing (comma separated).
     notify_emails = [x.strip() for x in (getattr(args, "notify_emails", None) or "").split(",") if x.strip()]
     notify_slack = [x.strip() for x in (getattr(args, "notify_slack", None) or "").split(",") if x.strip()]
 
@@ -2023,7 +2038,7 @@ def _cmd_urls(client: LiveAPISec, args: argparse.Namespace) -> int:
             "version": args.version,
             "schedule": args.schedule,
             "paused": True if args.paused else None,
-            # TODO 2.56 — powiadomienia per URL (tylko gdy podane).
+            # TODO 2.56 — per-URL notifications (only when given).
             "notify_emails": notify_emails or None,
             "notify_when": getattr(args, "notify_when", None),
             "notify_slack_connector_ids": notify_slack or None,
@@ -2062,7 +2077,7 @@ def _cmd_urls(client: LiveAPISec, args: argparse.Namespace) -> int:
 
 
 def _cmd_versions(client: LiveAPISec, args: argparse.Namespace) -> int:
-    """Lista wersji specyfikacji projektu — do przypinania na URL-ach (TODO 2.50)."""
+    """Project spec version list — for pinning on URLs (TODO 2.50)."""
     if not args.project:
         print("error: --project (id or slug) is required", file=sys.stderr)
         return 2
@@ -2088,7 +2103,7 @@ def _cmd_versions(client: LiveAPISec, args: argparse.Namespace) -> int:
 
 
 def _cmd_delete(client: LiveAPISec, args: argparse.Namespace) -> int:
-    """Usuń projekt (i wszystkie jego dane) — TODO 2.50/2.55."""
+    """Delete a project (and all its data) — TODO 2.50/2.55."""
     project = getattr(args, "project", None)
     if not project:
         print("error: --project (id or slug) is required", file=sys.stderr)
@@ -2112,10 +2127,10 @@ def _cmd_delete(client: LiveAPISec, args: argparse.Namespace) -> int:
 
 
 def _cmd_credentials(client: LiveAPISec, args: argparse.Namespace) -> int:
-    """Zarządzanie credentialami projektu per-prefix (TODO 2.50): list/set/rm.
+    """Per-prefix project credential management (TODO 2.50): list/set/rm.
 
-    Pozwala przypiąć różne zestawy auth do różnych tras, np. dev-key na
-    `/developers`, a Clerk na resztę — jeden skan dobiera właściwy per ścieżka.
+    Pins different auth sets to different routes, e.g. a dev-key on
+    `/developers` and Clerk on the rest — one scan picks the right one per path.
     """
     if not args.project:
         print("error: --project (id or slug) is required", file=sys.stderr)
@@ -2272,7 +2287,10 @@ def build_parser() -> argparse.ArgumentParser:
     _json_flag(p_code)
     p_code.set_defaults(func=_cmd_scan_code)
 
-    p_scan = sub.add_parser("scan", help="run a security scan (optionally wait + gate)")
+    p_scan = sub.add_parser(
+        "scan",
+        help="run a security scan: 141 automated tests (8 baseline + 133 deep), optionally wait + gate",
+    )
     p_scan.add_argument("--project", required=True, help="project id or slug")
     p_scan.add_argument("--branch")
     p_scan.add_argument("--commit")
@@ -2311,7 +2329,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="optional guided attack objective, e.g. \"check /users for IDOR\" "
         "(TODO 3.6.2)",
     )
-    # TODO 2.50 — druga tożsamość do testów różnicowych IDOR/RBAC w hacker-mode.
+    # TODO 2.50 — second identity for differential IDOR/RBAC tests in hacker mode.
     _auth_b_args(p_hacker)
     p_hacker.add_argument("--wait", action="store_true", help="poll until the agent finishes")
     p_hacker.add_argument(
@@ -2376,6 +2394,11 @@ def build_parser() -> argparse.ArgumentParser:
     _json_flag(p_compliance)
     p_compliance.set_defaults(func=_cmd_compliance)
 
+    p_brief = sub.add_parser("brief", help="threat brief: latest CISA KEV + does-it-affect-you checks")
+    p_brief.add_argument("--limit", type=int, default=10, help="max KEV items (default: 10)")
+    _json_flag(p_brief)
+    p_brief.set_defaults(func=_cmd_brief)
+
     p_report = sub.add_parser("report", help="full saved scan report (print or save)")
     p_report.add_argument("--project", required=True, help="project id or slug")
     p_report.add_argument("--scan", required=True)
@@ -2416,7 +2439,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     ask_sub = p_ask.add_subparsers(dest="ask_command", required=True)
 
-    p_ask_new = ask_sub.add_parser("new", help="new question session for a project (bank 270 + AI)")
+    p_ask_new = ask_sub.add_parser("new", help="new question session for a project (bank 295 + AI)")
     p_ask_new.add_argument("--project", required=True, help="project id or slug")
     p_ask_new.add_argument("--no-ai", action="store_true", help="bank only, no AI questions")
     _json_flag(p_ask_new)
@@ -2487,7 +2510,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--schedule", choices=["off", "6h", "12h", "24h", "weekly"], default=None
     )
     p_urls.add_argument("--paused", action="store_true", help="pause scheduled scans (set)")
-    # TODO 2.56 — powiadomienia per URL (e-mail/Slack).
+    # TODO 2.56 — per-URL notifications (email/Slack).
     p_urls.add_argument(
         "--notify-emails", dest="notify_emails",
         help="comma-separated e-mail recipients for this URL (add/set)",
@@ -2541,7 +2564,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_config.add_argument("--clear", action="store_true", help="remove the saved config file")
     p_config.set_defaults(func=_cmd_config)
 
-    # TODO 2.58 — login jak w aws/gcloud: device flow w przeglądarce + zapis tokenu.
+    # TODO 2.58 — login like aws/gcloud: browser device flow + token save.
     p_login = sub.add_parser(
         "login", help="log in via browser (device flow) and save the token locally"
     )
@@ -2580,8 +2603,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_cert.add_argument(
         "--type", choices=["badge", "banner", "card", "iframe"], default="badge"
     )
-    # TODO 2.60: certyfikat jest per projekt (slug należy do projektu); nie ma
-    # już sluga organizacji ani scope=org.
+    # TODO 2.60: the certificate is per project (slug belongs to the project); no
+    # more org slug or scope=org.
     p_cert.add_argument("--project", required=True, help="project id or slug")
     p_cert.add_argument(
         "--url",
@@ -2630,10 +2653,10 @@ def _needs_key(args: argparse.Namespace) -> bool:
 
 
 def _compat_argv(argv: list[str] | None) -> list[str] | None:
-    """Zgodność wsteczna: aliasy `--site` / `sites` → `--project` / `project`.
+    """Backwards compatibility: `--site` / `sites` aliases → `--project` / `project`.
 
-    Poziom „site” został usunięty (projekt = zbiór URL-i), ale przyjmujemy stare
-    flagi, żeby istniejące skrypty CI i dokumentacja nie przestały działać.
+    The "site" level was removed (project = URL set), but we still accept the old
+    flags so existing CI scripts and docs keep working.
     """
     if argv is None:
         argv = sys.argv[1:]
@@ -2683,7 +2706,7 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _print_error(exc: LiveAPISecError) -> None:
-    """Spójny komunikat błędu + podpowiedź przy 401 (klucz) / 402 (plan) / 403 (scope)."""
+    """Consistent error message + hint on 401 (key) / 402 (plan) / 403 (scope)."""
     print(f"error: {exc}", file=sys.stderr)
     if exc.status == 402:
         print(
@@ -2728,7 +2751,7 @@ def _prompt_for_key() -> str:
 
 
 def _save_login_token(api_url: str, token: str, who: dict[str, Any]) -> None:
-    """Zapisuje token + metadane loginu do configu (0600)."""
+    """Saves the token + login metadata to the config (0600)."""
     save_config({"api_url": api_url or ""})  # zachowaj wybrany API URL
     save_login(
         {
@@ -2756,8 +2779,8 @@ def _print_login_success(who: dict[str, Any]) -> None:
 
 
 def _cmd_login(client: LiveAPISec, args: argparse.Namespace) -> int:
-    """`liveapisec login` — device flow w przeglądarce lub `--token` (headless)."""
-    # 1) Headless: wklejony istniejący klucz z panelu (zachowana stara metoda).
+    """`liveapisec login` — browser device flow or `--token` (headless)."""
+    # 1) Headless: paste an existing key from the dashboard (old method kept).
     if getattr(args, "token", None):
         probe = LiveAPISec(api_url=client.api_url, api_key=args.token)
         try:
@@ -2772,7 +2795,7 @@ def _cmd_login(client: LiveAPISec, args: argparse.Namespace) -> int:
             _print_login_success(who)
         return 0
 
-    # 2) CI / brak terminala: login wymaga przeglądarki — w CI użyj sekretu.
+    # 2) CI / no TTY: login needs a browser — use a secret in CI.
     if os.environ.get("CI") or not sys.stdin.isatty():
         print(
             "error: `login` needs a browser and an interactive terminal.\n"
@@ -2795,7 +2818,7 @@ def _cmd_login(client: LiveAPISec, args: argparse.Namespace) -> int:
     print(f"  First, copy your one-time code:  {_bold(dev['user_code'])}")
     print(f"  Then open:  {url}")
     if not getattr(args, "no_browser", False):
-        with contextlib.suppress(Exception):  # brak przeglądarki → zostaje sam URL
+        with contextlib.suppress(Exception):  # no browser → bare URL stays
             if webbrowser.open(url):
                 print(_dim("  (opened in your browser)"))
     print()
@@ -2819,7 +2842,7 @@ def _cmd_login(client: LiveAPISec, args: argparse.Namespace) -> int:
             else:
                 try:
                     who = LiveAPISec(api_url=client.api_url, api_key=tok["api_key"]).whoami()
-                except LiveAPISecError:  # metadane z tokenu wystarczą
+                except LiveAPISecError:  # metadata from the token is enough
                     who = tok
                 _print_login_success(who)
             return 0
@@ -2831,7 +2854,7 @@ def _cmd_login(client: LiveAPISec, args: argparse.Namespace) -> int:
 
 
 def _cmd_logout(client: LiveAPISec, args: argparse.Namespace) -> int:
-    """`liveapisec logout` — usuwa zapisany token (klucz w panelu zostaje)."""
+    """`liveapisec logout` — removes the saved token (the dashboard key stays)."""
     path = clear_login()
     if args.json:
         print(LiveAPISec.dump({"logged_out": True, "config": path}))
@@ -2841,7 +2864,7 @@ def _cmd_logout(client: LiveAPISec, args: argparse.Namespace) -> int:
 
 
 def _cmd_whoami(client: LiveAPISec, args: argparse.Namespace) -> int:
-    """`liveapisec whoami` — organizacja, prefix klucza, scopes, wygaśnięcie."""
+    """`liveapisec whoami` — organisation, key prefix, scopes, expiry."""
     try:
         who = client.whoami()
     except LiveAPISecError as exc:
@@ -2870,7 +2893,7 @@ def _cmd_config(client: LiveAPISec, args: argparse.Namespace) -> int:
     print(f"config: {path}")
     print(f"api_key: {'set' if cfg.get('api_key') else 'not set'}")
     print(f"api_url: {cfg.get('api_url') or '(default ' + DEFAULT_API_URL + ')'}")
-    # TODO 2.58 — metadane loginu (jeśli używano `liveapisec login`).
+    # TODO 2.58 — login metadata (if `liveapisec login` was used).
     if cfg.get("key_prefix"):
         print(f"login key: {cfg['key_prefix']}…")
     if cfg.get("org_id"):

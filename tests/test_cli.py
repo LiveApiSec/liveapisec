@@ -2056,3 +2056,26 @@ def test_print_scan_summary_shows_budget_exhaustion(capsys) -> None:
     out = capsys.readouterr().out
     assert "coverage=20 of 25 tested" in out
     assert "budget exhausted (5 untested)" in out
+
+
+def test_cli_brief(capsys) -> None:
+    """TODO 2.65 R4 w CLI: `brief` drukuje KEV + check; --json oddaje surowy payload."""
+    from liveapisec.cli import _cmd_brief
+
+    class Args:
+        limit = 10; json = False
+
+    class Client:
+        def get_threat_brief(self, limit=10):
+            assert limit == 10
+            return {
+                "count": 1,
+                "guidance": "KEV means patch first",
+                "items": [{"cve": "CVE-2024-0001", "vendor": "Acme",
+                           "product": "W", "added": "2024-05-01",
+                           "check": "Is Acme / W in your stack?"}],
+            }
+
+    assert _cmd_brief(Client(), Args()) == 0
+    out = capsys.readouterr().out
+    assert "CVE-2024-0001" in out and "in your stack" in out
