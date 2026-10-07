@@ -39,8 +39,8 @@ def _clean_error_text(text: str) -> str:
     import re as _re
 
     if "<" in text and ">" in text:
-        text = _re.sub(r"<script.*?</script>", " ", text, flags=_re.S | _re.I)
-        text = _re.sub(r"<style.*?</style>", " ", text, flags=_re.S | _re.I)
+        text = _re.sub(r"<script.*?</script>", " ", text, flags=_re.DOTALL | _re.IGNORECASE)
+        text = _re.sub(r"<style.*?</style>", " ", text, flags=_re.DOTALL | _re.IGNORECASE)
         text = _re.sub(r"<[^>]+>", " ", text)
         text = _html.unescape(text)
     return _re.sub(r"\s+", " ", text).strip()[:300]
