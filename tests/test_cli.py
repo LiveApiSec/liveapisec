@@ -2079,3 +2079,38 @@ def test_cli_brief(capsys) -> None:
     assert _cmd_brief(Client(), Args()) == 0
     out = capsys.readouterr().out
     assert "CVE-2024-0001" in out and "in your stack" in out
+
+
+def test_cli_ask_show_only_unanswered_filters_clarifications(capsys) -> None:
+    """Bug 1: `ask show --only unanswered` nie pokazuje ODPOWIEDZIANYCH doprecyzowan."""
+    from liveapisec.cli import _cmd_ask_show
+
+    class Args:
+        session = "s1"; only = "unanswered"; json = False
+
+    class Client:
+        def get_ask_session(self, session):
+            return {
+                "counts": {},
+                "questions": [
+                    {"qid": "SEC-ASK-CL-1", "kind": "clarification",
+                     "question": "Which ORM?", "fix": "",
+                     "answer": {"note": "Django ORM"}},
+                    {"qid": "SEC-ASK-1", "kind": "audit", "category": "auth",
+                     "question": "Q?", "fix": "", "answer": {}},
+                ],
+            }
+
+    assert _cmd_ask_show(Client(), Args()) == 0
+    out = capsys.readouterr().out
+    assert "SEC-ASK-1" in out and "Which ORM?" not in out
+
+
+def test_cli_error_text_strips_html(capsys) -> None:
+    """Bug 3: HTML z proxy (502/504) nie sypie markupiem na terminal."""
+    from liveapisec.client import _clean_error_text
+
+    html = "<html><head><style>x{}</style></head><body><h1>504 Gateway Timeout</h1></body></html>"
+    clean = _clean_error_text(html)
+    assert "<" not in clean and "504 Gateway Timeout" in clean
+    assert _clean_error_text("plain boom") == "plain boom"

@@ -1708,6 +1708,8 @@ def _cmd_ask_show(client: LiveAPISec, args: argparse.Namespace) -> int:
     only = getattr(args, "only", None)
     print(_ask_counts_line(data))
     clar = [q for q in data.get("questions") or [] if q.get("kind") == "clarification"]
+    if only == "unanswered":
+        clar = [q for q in clar if not ((q.get("answer") or {}).get("note") or (q.get("answer") or {}).get("verdict"))]
     if clar and only != "failed":
         print("\n" + _bold("Clarifications (no priority — answers sharpen the next round):"))
         for q in clar:

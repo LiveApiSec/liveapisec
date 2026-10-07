@@ -29,6 +29,23 @@ ENV_API_KEY = "LIVEAPISEC_API_KEY"
 _SEV_ORDER = ["critical", "high", "medium", "low", "info"]
 
 
+def _clean_error_text(text: str) -> str:
+    """Strip HTML from non-JSON error pages (proxy 502/504) before printing.
+
+    A raw gateway page pasted into the terminal is unreadable — collapse it
+    to plain text so `--until-dry` timeouts show a reason, not markup.
+    """
+    import html as _html
+    import re as _re
+
+    if "<" in text and ">" in text:
+        text = _re.sub(r"<script.*?</script>", " ", text, flags=_re.S | _re.I)
+        text = _re.sub(r"<style.*?</style>", " ", text, flags=_re.S | _re.I)
+        text = _re.sub(r"<[^>]+>", " ", text)
+        text = _html.unescape(text)
+    return _re.sub(r"\s+", " ", text).strip()[:300]
+
+
 def severity_rank(severity: str) -> int:
     """0 = critical (worst) … 4 = info. Unknown → 5 (below info)."""
     try:
@@ -111,7 +128,7 @@ class LiveAPISec:
                 title = body.get("title", "Error")
                 detail = body.get("detail", resp.text[:300])
             except Exception:  # noqa: BLE001
-                title, detail = "Error", resp.text[:300]
+                title, detail = "Error", _clean_error_text(resp.text[:500])
             retry_after: float | None = None
             if resp.status_code == 429:
                 try:
@@ -436,7 +453,7 @@ class LiveAPISec:
                 title = body.get("title", "Error")
                 detail = body.get("detail", resp.text[:300])
             except Exception:  # noqa: BLE001
-                title, detail = "Error", resp.text[:300]
+                title, detail = "Error", _clean_error_text(resp.text[:500])
             raise LiveAPISecError(resp.status_code, title, detail)
         filename = f"liveapisec-certificate-{variant}-{scan_id}.pdf"
         disp = resp.headers.get("content-disposition", "")
@@ -575,7 +592,7 @@ class LiveAPISec:
                 title = body.get("title", "Error")
                 detail = body.get("detail", resp.text[:300])
             except Exception:  # noqa: BLE001
-                title, detail = "Error", resp.text[:300]
+                title, detail = "Error", _clean_error_text(resp.text[:500])
             raise LiveAPISecError(resp.status_code, title, detail)
         if resp.status_code == 204 or not resp.content:
             return None
