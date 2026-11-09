@@ -408,6 +408,15 @@ def _fmt_scan(scan: dict[str, Any]) -> str:
         else:
             parts.append(f"tests={summary.get('tests_run', '?')}")
         parts.append(f"findings={summary.get('findings', 0)}" + (f" ({sev})" if sev else ""))
+    elif status == "failed":
+        # Nie zostawiaj użytkownika z samym `status=failed` — pokaż prawdziwą
+        # przyczynę (np. credential 401) i podpowiedź, jak ją naprawić.
+        err = summary.get("error") or "unknown error"
+        parts.append(f'reason="{err}"')
+        if summary.get("error_code"):
+            parts.append(f"code={summary['error_code']}")
+    if status in ("failed", "skipped") and summary.get("error_hint"):
+        parts.append(f'hint="{summary["error_hint"]}"')
     return " ".join(parts)
 
 
@@ -1897,7 +1906,12 @@ def _cmd_projects(client: LiveAPISec, args: argparse.Namespace) -> int:
                 )
             )
             parts.append(f"{last['findings']} findings" + (f" ({sev_str})" if sev_str else ""))
-        return f"  {label}  {_dim(url)}  {_dim(' · '.join(parts))}"
+        if status == "failed" and last.get("error"):
+            parts.append(f'reason="{last["error"]}"')
+        line = f"  {label}  {_dim(url)}  {_dim(' · '.join(parts))}"
+        if status == "failed" and last.get("error_hint"):
+            line += f"\n    {_red('fix:')} {_dim(last['error_hint'])}"
+        return line
 
     for p in sorted(projects, key=lambda x: (x.get("name") or "").lower()):
         print(_last_line(p))
@@ -2292,7 +2306,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_scan = sub.add_parser(
         "scan",
-        help="run a security scan: 141 automated tests (8 baseline + 133 deep), optionally wait + gate",
+        help="run a security scan: 149 automated tests (8 baseline + 141 deep), optionally wait + gate",
     )
     p_scan.add_argument("--project", required=True, help="project id or slug")
     p_scan.add_argument("--branch")

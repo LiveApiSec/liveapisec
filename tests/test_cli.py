@@ -604,7 +604,16 @@ def test_cli_scans_lists_history_and_summarizes(capsys) -> None:
                     "commit": "abc",
                     "summary": {"tests_run": 42, "findings": 3, "by_severity": {"high": 1, "medium": 2}},
                 },
-                {"scan_id": "s2", "status": "failed", "branch": "main"},
+                {
+                    "scan_id": "s2",
+                    "status": "failed",
+                    "branch": "main",
+                    "summary": {
+                        "error": "credential authentication failed: HTTP 401",
+                        "error_code": "credential_auth",
+                        "error_hint": "Verify the credential and retry.",
+                    },
+                },
                 {"scan_id": "s1", "status": "completed", "summary": {"tests_run": 5, "findings": 0}},
             ]
 
@@ -620,6 +629,10 @@ def test_cli_scans_lists_history_and_summarizes(capsys) -> None:
     assert "tests=42" in out and "findings=3" in out
     assert "high=1 medium=2" in out
     assert "status=failed" in out
+    # Przyczyna i podpowiedź muszą być widoczne bez wchodzenia w panel.
+    assert "credential authentication failed" in out
+    assert "code=credential_auth" in out
+    assert "Verify the credential and retry." in out
 
     class Args:
         project = "65f"
